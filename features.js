@@ -1,0 +1,237 @@
+(function(){
+'use strict';
+const API=window.MathAnalyzeExtensionAPI;
+if(!API)return;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+const reasonNames={K:'知識不熟',P:'推理／方法錯',C:'已確認非知識性失誤',T:'時間不足',U:'未判定'};
+let generating=false, initialized=false, selectedIds=new Set(), imageCache=new Map(), detailList=[];
+function toast(message,err){API.toast(message,!!err);}
+function snapshot(){return API.snapshot();}
+function selectedTopics(){return Array.from(document.querySelectorAll('#paperTopics input:checked')).map(x=>x.value);}
+function bulkCandidates(){return snapshot().papers.filter(p=>p.mode==='individual'&&p.batchId);}
+function batchGroups(){
+ const groups=new Map();
+ bulkCandidates().forEach(p=>{if(!groups.has(p.batchId))groups.set(p.batchId,[]);groups.get(p.batchId).push(p);});
+ return [...groups.entries()].reverse();
+}
+function renderStudents(){
+ const s=snapshot(),container=$('bulkStudentList');
+ if(!container)return;
+ const current=new Set(s.students);
+ for(const id of [...selectedIds])if(!current.has(id))selectedIds.delete(id);
+ if(!initialized&&s.students.length){selectedIds=new Set(s.students);initialized=true;}
+ container.innerHTML=s.students.length?s.students.map(id=>'<label class="batch-student"><input type="checkbox" data-bulk-student="'+esc(id)+'" '+(selectedIds.has(id)?'checked':'')+'><span>'+esc(id)+'</span></label>').join(''):'<div class="notice warn">目前尚未建立學生代號。請先到「設定與備份」新增學生。</div>';
+ $('bulkSelectedCount').textContent='已選 '+selectedIds.size+'／'+s.students.length+' 位';
+ $('bulkDownload').disabled=generating||!selectedIds.size||!s.ready;
+ $('bulkMergeExisting').disabled=generating||!selectedIds.size||!s.ready||!s.papers.some(p=>p.mode==='individual'&&selectedIds.has(p.student));
+}
+function renderBatches(){
+ const box=$('bulkHistory');if(!box)return;
+ const groups=batchGroups();
+ box.innerHTML=groups.length?groups.slice(0,10).map(([id,papers])=>{
+  let dt=papers[0]?.date||'';
+  return '<div class="batch-history-item"><span><strong>'+esc(papers[0].title.replace(/｜[^｜]+$/,''))+'</strong><small>'+esc(papers[0].trainingDate||dt.slice(0,10))+' · '+papers.length+' 位 · '+papers[0].questionIds.length+'題／人</small></span><span class="actions"><button class="btn" data-bulk-redownload="'+esc(id)+'">下載合併PDF</button><button class="btn" data-bulk-answers="'+esc(id)+'">答案CSV</button></span></div>';
+ }).join(''):'<p class="hint">尚無已建立的批次個別卷。按上方「批次產生並下載」即可開始。</p>';
+}
+function setBusy(on,message){
+ generating=on;$('bulkDownload').disabled=on||!selectedIds.size||!snapshot().ready;
+ $('bulkMergeExisting').disabled=on||!selectedIds.size||!snapshot().ready;
+ if($('bulkProgress'))$('bulkProgress').textContent=message||'';
+ document.querySelectorAll('[data-bulk-redownload]').forEach(btn=>btn.disabled=on);
+}
+function downloadBlob(blob,filename){
+ const url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+function csv(rows,filename){
+ const body='\ufeff'+rows.map(row=>row.map(value=>{
+  let s=String(value==null?'':value);
+  if(/^[=+\-@\t\r]/.test(s))s="'"+s;
+  return '"'+s.replace(/"/g,'""')+'"';
+ }).join(',')).join('\r\n');
+ downloadBlob(new Blob([body],{type:'text/csv;charset=utf-8'}),filename);
+}
+function answerRows(papers){
+ const rows=[['學生代號','試卷名稱','題號','題庫編號','教師分類','原題庫答案']];
+ papers.forEach(p=>p.questionIds.forEach((id,i)=>{
+   const q=API.question(id)||{};
+   rows.push([p.student,p.title,i+1,id,q.teacher_category_label||q.primary_topic||'分類待核對',q.answer_as_provided||'待核對']);
+ }));
+ return rows;
+}
+function batchAnswers(papers){csv(answerRows(papers),'MathAnalyze_個別卷答案_'+papers.length+'人_'+new Date().toISOString().slice(0,10)+'.csv');}
+function headerPng(p,continued){
+ const c=document.createElement('canvas');
+ c.width=1500;c.height=215;const ctx=c.getContext('2d');
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,1500,215);ctx.fillStyle='#152d47';
+ ctx.font='bold 51px "Microsoft JhengHei","Noto Sans TC",sans-serif';
+ ctx.fillText((p.title||'理化個別卷').slice(0,31),22,67,1440);
+ ctx.font='34px "Microsoft JhengHei","Noto Sans TC",sans-serif';
+ ctx.fillText('訓練日期：'+(p.trainingDate||String(p.date||'').slice(0,10))+'    學生代號：'+p.student+'    時間：'+p.minutes+'分鐘    題數：'+p.questionIds.length+'題'+(continued?'    （續頁）':''),22,127,1440);
+ ctx.strokeStyle='#92a5b8';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(22,165);ctx.lineTo(1470,165);ctx.stroke();
+ return c.toDataURL('image/png');
+}
+async function asJpeg(blob){
+ const bitmap=await createImageBitmap(blob);
+ const canvas=document.createElement('canvas');let width=bitmap.width;
+ const factor=Math.min(1,1600/width);
+ canvas.width=Math.max(1,Math.round(width*factor));canvas.height=Math.max(1,Math.round(bitmap.height*factor));
+ const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
+ const data=canvas.toDataURL('image/jpeg',0.91);
+ bitmap.close();canvas.width=1;canvas.height=1;
+ return {data:data,width:Math.round(width*factor),height:Math.round(bitmap.height*factor)};
+}
+async function getJpeg(id){
+ if(imageCache.has(id))return imageCache.get(id);
+ const b=await API.imageBlob(id);if(!b)throw Error('題目 '+id+' 圖片不存在，請先重新匯入 v1 題圖包。');
+ const result=await asJpeg(b);imageCache.set(id,result);return result;
+}
+async function combinedPdf(papers){
+ if(!papers.length)throw Error('未選擇任何個別卷。');
+ if(!snapshot().ready)throw Error('請先匯入 v1 題圖包，才能合併下載。');
+ const JSPDF=window.jspdf?.jsPDF;if(!JSPDF)throw Error('PDF 組件未載入，請檢查網路連線並重新整理。');
+ const pdf=new JSPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
+ const W=210,H=297,margin=14,imageX=28,imageW=169,top=44,bottom=278;
+ let total=0,started=false;
+ imageCache=new Map();
+ try {
+ for(let k=0;k<papers.length;k++){
+   const p=papers[k];
+   if(started)pdf.addPage();
+   started=true;
+   let y=top,part=1;
+   const drawHead=()=>{pdf.addImage(headerPng(p,part>1),'PNG',margin,12,182,26);y=44;};
+   drawHead();
+   for(let i=0;i<p.questionIds.length;i++){
+    const id=p.questionIds[i],asset=await getJpeg(id);
+    if(!asset.width||!asset.height)throw Error('圖片 '+id+' 尺寸異常');
+    let h=asset.height/asset.width*imageW;
+    if(h>bottom-top-10)h=bottom-top-10;
+    if(y+h+9>bottom){pdf.addPage();part++;drawHead();}
+    pdf.setFont('helvetica','normal');pdf.setFontSize(10);pdf.setTextColor(35,48,67);
+    pdf.text(String(i+1)+'.',16,y+6);
+    pdf.addImage(asset.data,'JPEG',imageX,y,imageW,h,'q_'+id,'FAST');
+    y+=h+8;total++;
+    if(total%7===0){setBusy(true,'正在合併 '+(k+1)+'／'+papers.length+' 位，已加入 '+total+' 題……');await new Promise(r=>setTimeout(r,0));}
+   }
+ }
+ const file='MathAnalyze_個別卷合併_'+papers.length+'人_'+new Date().toISOString().slice(0,10)+'.pdf';
+ setBusy(true,'PDF 已排版完成，正在準備下載……');
+ pdf.save(file);
+ toast('已產生合併PDF：'+papers.length+'位學生、'+total+'題。');
+ } finally {imageCache.clear();}
+}
+async function runBatch(){
+ if(generating)return;
+ const s=snapshot(),ids=s.students.filter(id=>selectedIds.has(id));
+ if(!ids.length)return toast('請先選擇學生。',true);
+ if(!s.ready)return toast('請先在設定與備份匯入 v1 題圖包。',true);
+ const count=Number($('paperCount').value),minutes=Number($('paperMinutes').value),trainingDate=$('paperDate').value,topics=selectedTopics();
+ if(!topics.length)return toast('至少選擇一個考點。',true);
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(trainingDate))return toast('請選擇訓練日期。',true);
+ if(ids.length*count>700&&!confirm('此次共 '+ids.length*count+' 題，合併 PDF 可能需要較長時間及記憶體。仍要繼續嗎？'))return;
+ setBusy(true,'正在為 '+ids.length+' 位學生選題……');
+ try{
+  const papers=API.createBatch({students:ids,count,minutes,trainingDate,topics,title:$('paperTitle').value});
+  renderBatches();
+  await combinedPdf(papers);
+ }catch(err){toast('批次處理未完成：'+err.message,true);setBusy(true,'操作遇到問題：'+err.message+'。如已產生試卷，可在下方「歷次批次」重新下載。');}
+ finally{setBusy(false,$('bulkProgress').textContent);}
+}
+
+async function mergeExisting(){
+ if(generating)return;
+ const s=snapshot(),ids=s.students.filter(id=>selectedIds.has(id));
+ const latest=ids.map(id=>s.papers.filter(p=>p.mode==='individual'&&p.student===id).at(-1)).filter(Boolean);
+ const missing=ids.filter(id=>!latest.some(p=>p.student===id));
+ if(!latest.length)return toast('選取的學生尚未產生個別試卷。',true);
+ if(missing.length&&!confirm('有 '+missing.length+' 位學生沒有已建立的個別卷（'+missing.slice(0,5).join('、')+(missing.length>5?'…':'')+'），只合併其餘 '+latest.length+' 位，確定嗎？'))return;
+ if(latest.length>1&&new Set(latest.map(p=>p.minutes+'-'+(p.trainingDate||String(p.date||'').slice(0,10))+'-'+p.questionIds.length)).size>1){
+ if(!confirm('這些學生最新試卷的訓練日期、題數或考試時間不完全相同，仍要合併嗎？'))return;
+ }
+ setBusy(true,'正在合併 '+latest.length+' 份既有個別卷……');
+ try{await combinedPdf(latest);}catch(err){toast('合併失敗：'+err.message,true);}finally{setBusy(false,'');}
+}
+
+function studentData(student){
+ const s=snapshot(),papers=new Map(s.papers.map(p=>[p.id,p]));
+ const rec=s.results.filter(r=>r.student===student&&papers.has(r.paperId)).sort((a,b)=>new Date(b.date)-new Date(a.date));
+ const topics=new Map(s.topics.map(t=>[t[0],{name:t[1],count:0,correct:0,wrong:0,blank:0,dates:new Set()}]));
+ const errors=[],times=new Map(),unique=new Set();
+ let total=0,correct=0,wrong=0,blank=0,minutes=0;
+ rec.forEach(r=>{
+  const p=papers.get(r.paperId);
+  const wrongSet=new Set(r.wrong||[]),blankSet=new Set(r.blank||[]);
+  minutes+=Number(r.minutes)||0;
+  p.questionIds.forEach((id,index)=>{
+   const q=API.question(id)||{},topic=topics.get(q.primary_topic_code);
+   const status=wrongSet.has(id)?'wrong':blankSet.has(id)?'blank':'correct';
+   if(topic){topic.count++;topic.dates.add(String(r.date||'').slice(0,10));}
+   total++;
+   if(status==='correct'){correct++;if(topic)topic.correct++;return;}
+   if(status==='wrong'){wrong++;if(topic)topic.wrong++;}
+   else{blank++;if(topic)topic.blank++;}
+   times.set(id,(times.get(id)||0)+1);unique.add(id);
+   errors.push({id,order:index+1,status,topic:q.teacher_category_label||q.primary_topic||'待核對',reason:r.reasons?.[id]||'U',paper:p.title,date:p.trainingDate||String(r.date||'').slice(0,10)});
+  });
+ });
+ return {rec,topics,errors,times,unique,total,correct,wrong,blank,minutes};
+}
+function individualReport(){
+ const box=$('studentWrongDetail');if(!box)return;
+ const student=$('reportScope').value||'class';
+ if(student==='class'){box.innerHTML='<p class="notice">請先在上方「學習分析」的下拉選單選擇某位學生，即可查看該學生的實際錯題、未作答紀錄與重複失分考點。</p>';return;}
+ const data=studentData(student),topics=[...data.topics.entries()].map(([code,z])=>({code,...z})).sort((a,b)=>b.wrong+b.blank-(a.wrong+a.blank));
+ const topicRows=topics.map(z=>{
+  const errors=z.wrong+z.blank;
+  const ratio=z.count?(100*(z.count-errors)/z.count).toFixed(0)+'%':'—';
+  const tag=!z.count?'未測':errors>=2&&z.dates.size>=2?'跨回失分':errors?'須回刷':'本次未失分';
+  return '<tr><td>'+esc(z.name)+'</td><td class="num">'+z.count+'</td><td class="num">'+z.wrong+'</td><td class="num">'+z.blank+'</td><td class="num">'+ratio+'</td><td><span class="chip '+(errors?'wait':'ok')+'">'+tag+'</span></td></tr>';
+ }).join('');
+ const errors=data.errors.map((e,i)=>{
+  return '<tr><td>'+esc(e.date)+'</td><td title="'+esc(e.paper)+'">'+esc(e.paper.length>26?e.paper.slice(0,25)+'…':e.paper)+'</td><td>'+e.order+'</td><td>'+esc(e.id)+'</td><td>'+esc(e.topic)+'</td><td><span class="chip '+(e.status==='wrong'?'bad':'wait')+'">'+(e.status==='wrong'?'答錯':'未作答')+'</span></td><td>'+esc(reasonNames[e.reason]||'未判定')+'</td><td><button class="btn" data-show-wrong="'+esc(e.id)+'">看原題</button></td></tr>';
+ }).join('');
+ detailList=data.errors;
+ const repeated=[...data.times.entries()].filter(([id,n])=>n>=2);
+ box.innerHTML='<div class="actions" style="justify-content:space-between"><div><h3 class="section-title">個別錯題明細｜'+esc(student)+'</h3><p class="hint">只使用這位學生已登記的真實作答紀錄；「未作答」與「答錯」分開計算。</p></div><button class="btn" id="downloadStudentWrong" '+(data.errors.length?'':'disabled')+'>匯出個別錯題CSV</button></div>'+
+ '<div class="grid grid-4" style="margin:14px 0">'+stat('累積作答',data.total+'題',data.rec.length+'回測驗')+stat('答錯',data.wrong+'題','不含未作答')+stat('未作答',data.blank+'題','獨立計算')+stat('相同原題再次失分',repeated.length+'題','按穩定題庫編號')+'</div>'+
+ '<h4>八項考點的失分分布</h4><div class="table-scroll"><table><thead><tr><th>教師確認分類</th><th class="num">作答</th><th class="num">答錯</th><th class="num">未作答</th><th class="num">正確率</th><th>標記</th></tr></thead><tbody>'+topicRows+'</tbody></table></div>'+
+ '<h4 style="margin-top:20px">逐題紀錄（最新在前）</h4>'+
+ (data.errors.length?'<div class="table-scroll"><table><thead><tr><th>日期</th><th>試卷</th><th>題號</th><th>來源ID</th><th>考點</th><th>狀態</th><th>錯因</th><th></th></tr></thead><tbody>'+errors+'</tbody></table></div>':'<p class="notice">目前沒有已登記的答錯或未作答題目；若尚未測驗，不能視為全部考點均已熟練。</p>')+
+ '<p class="hint">「跨回失分」代表該考點累積失分至少2次且出現在不同日期的測驗中；不等同重複答錯同一原題。錯因須由教師標記，未填者維持未判定。</p>';
+ const dl=$('downloadStudentWrong');if(dl)dl.onclick=()=>csv([['學生代號','日期','試卷','題號','來源題庫編號','教師確認考點','作答狀態','錯誤原因']].concat(data.errors.map(e=>[student,e.date,e.paper,e.order,e.id,e.topic,e.status==='wrong'?'答錯':'未作答',reasonNames[e.reason]||'未判定'])),'MathAnalyze_個別錯題_'+student+'.csv');
+}
+function stat(title,value,detail){return '<div class="card kpi"><div class="k">'+esc(title)+'</div><div class="num">'+esc(value)+'</div><div class="foot">'+esc(detail)+'</div></div>';}
+async function openWrong(id){
+ const q=API.question(id),b=await API.imageBlob(id);
+ if(!b)return toast('找不到 '+id+' 的題圖；請重新匯入 v1 題庫。',true);
+ const dlg=$('wrongDialog');const url=URL.createObjectURL(b);
+ dlg.querySelector('.wrong-preview-title').textContent=id+'｜'+(q?.teacher_category_label||q?.primary_topic||'');
+ const img=dlg.querySelector('img');img.src=url;img.onload=()=>URL.revokeObjectURL(url);
+ if(typeof dlg.showModal==='function')dlg.showModal();else{dlg.setAttribute('open','');}
+}
+function refresh(){renderStudents();renderBatches();individualReport();}
+function init(){
+ $('bulkSelectAll').onclick=()=>{selectedIds=new Set(snapshot().students);renderStudents();};
+ $('bulkSelectNone').onclick=()=>{selectedIds.clear();initialized=true;renderStudents();};
+ $('bulkStudentList').addEventListener('change',e=>{const id=e.target.dataset.bulkStudent;if(!id)return;if(e.target.checked)selectedIds.add(id);else selectedIds.delete(id);initialized=true;renderStudents();});
+ $('bulkDownload').onclick=runBatch;
+ $('bulkMergeExisting').onclick=mergeExisting;
+ $('bulkHistory').addEventListener('click',async e=>{
+  const dl=e.target.closest('[data-bulk-redownload]'),ans=e.target.closest('[data-bulk-answers]');
+  const id=dl?.dataset.bulkRedownload||ans?.dataset.bulkAnswers;if(!id)return;
+  const papers=snapshot().papers.filter(p=>p.batchId===id).sort((a,b)=>a.student.localeCompare(b.student,'zh-Hant'));
+  if(ans){batchAnswers(papers);return;}if(generating)return;
+  setBusy(true,'正在合併既有批次 '+papers.length+' 份試卷……');
+  try{await combinedPdf(papers);}catch(err){toast('下載失敗：'+err.message,true);}finally{setBusy(false,'');}
+ });
+ $('studentWrongDetail').addEventListener('click',e=>{const btn=e.target.closest('[data-show-wrong]');if(btn)openWrong(btn.dataset.showWrong);});
+ $('wrongDialogClose').onclick=()=>$('wrongDialog').close?.();
+ refresh();
+}
+window.MathAnalyzeExtensions={refresh:refresh,studentData:studentData,answerRows:answerRows};
+init();
+})();
