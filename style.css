@@ -17,3 +17,14 @@
 @media(max-width:920px){.bulk-students{grid-template-columns:repeat(5,minmax(0,1fr))}}
 @media(max-width:620px){.bulk-students{grid-template-columns:repeat(3,minmax(0,1fr))}.batch-history-item{flex-direction:column;align-items:stretch}.batch-history-item .actions{align-self:flex-start}#studentWrongDetail .grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media print{.wrong-dialog,#batchPanel,#studentWrongDetail{display:none!important}}
+
+/* Fixed-page science exam composer */
+.fixed-topic-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.fixed-topic-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:#f9fbfe;border:1px solid var(--line);border-radius:10px}
+.fixed-topic-row>label:first-child{display:flex;align-items:center;gap:7px;flex:1;cursor:pointer;font-size:14px}
+.fixed-topic-row [data-fixed-topic]{accent-color:var(--blue)}
+.fixed-min-label{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:13px;color:var(--sub)}
+.fixed-min-label input{width:72px;min-width:0;padding:7px 5px;text-align:center;font-variant-numeric:tabular-nums}
+#fixedStatus{margin-top:12px;line-height:1.75}
+#fixedCreate{white-space:normal}
+@media(max-width:700px){.fixed-topic-row{flex-wrap:wrap}.fixed-min-label input{width:68px}}
