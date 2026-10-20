@@ -90,6 +90,15 @@ function refreshStudents(){
  $('studentsList').innerHTML=state.students.length?state.students.map(function(s){return '<span class="pill">'+safe(s)+' <button title="移除" data-remove-student="'+safe(s)+'">×</button></span>';}).join(''):'<span class="hint">尚未新增學生</span>';
  ['paperStudent','recordStudent'].forEach(function(id){studentOptions(id,false);});studentOptions('reportScope',true);
 }
+function syncRecordStudent(){
+ var paper=paperOf(val('recordPaper')),field=$('recordStudent');
+ if(!field||!paper||paper.mode!=='individual'||!paper.student)return;
+ // Historical individual exams may refer to a student no longer in the current roster.
+ if(!Array.from(field.options).some(function(o){return o.value===paper.student;})){
+  var option=document.createElement('option');option.value=paper.student;option.textContent=paper.student+'（原試卷學生）';field.add(option);
+ }
+ field.value=paper.student;
+}
 function historySeen(id,scope){var x=summarize(scope).seen[id];return x;}
 function selectQuestions(count,topicCodes,scope,trainingDate){
  if(!catalog||!window.MathAnalyzeAdaptive)throw Error('自適應選題引擎尚未載入，請重新整理網站。');
@@ -119,7 +128,7 @@ function makePaper(){
 }
 function paperList(){
  $('paperList').innerHTML=state.papers.length?state.papers.slice().reverse().map(function(p){return '<div class="item"><div><h4>'+safe(p.title)+'</h4><p>'+safe(p.trainingDate||String(p.date).slice(0,10))+' · '+p.questionIds.length+'題 · '+p.minutes+'分鐘 · '+(p.mode==='individual'?safe(p.student):'全班')+'</p><p class="small muted">'+safe(selectionSummary(p))+'</p></div><button class="btn'+(p.id===selectedPaperId?' primary':'')+'" data-paper-id="'+safe(p.id)+'">查看</button></div>';}).join(''):empty('還沒有考卷','請先匯入題圖包，再從左側設定考點與測驗時間。');
- var lastRecordPaper=val('recordPaper');$('recordPaper').innerHTML='<option value="">請選擇試卷</option>'+state.papers.slice().reverse().map(function(p){return '<option value="'+safe(p.id)+'">'+safe(p.title)+'</option>';}).join('');if(lastRecordPaper&&state.papers.some(function(p){return p.id===lastRecordPaper;}))$('recordPaper').value=lastRecordPaper;else if(state.papers.length)$('recordPaper').value=state.papers[state.papers.length-1].id;
+ var lastRecordPaper=val('recordPaper');$('recordPaper').innerHTML='<option value="">請選擇試卷</option>'+state.papers.slice().reverse().map(function(p){return '<option value="'+safe(p.id)+'">'+safe(p.title)+'</option>';}).join('');if(lastRecordPaper&&state.papers.some(function(p){return p.id===lastRecordPaper;}))$('recordPaper').value=lastRecordPaper;else if(state.papers.length)$('recordPaper').value=state.papers[state.papers.length-1].id;syncRecordStudent();
 }
 async function renderPreview(){
  var token=++previewToken,p=paperOf(selectedPaperId);
@@ -237,7 +246,7 @@ function events(){
  $('paperMinutes').onchange=function(){if(val('paperMinutes')==='45')$('paperCount').value='25';else if(val('paperMinutes')==='15')$('paperCount').value='10';else $('paperCount').value='15';};
  $('paperTopics').addEventListener('change',function(){var n=Array.from(document.querySelectorAll('#paperTopics input:checked')).length;$('candidateCount').textContent='已選 '+n+' 個考點';});
  $('makePaper').onclick=makePaper;$('printPaper').onclick=printCurrent;$('downloadAnswers').onclick=answersCsv;
- $('recordPaper').onchange=loadExistingRecord;$('recordStudent').onchange=loadExistingRecord;$('saveRecord').onclick=saveRecord;
+ $('recordPaper').onchange=function(){syncRecordStudent();loadExistingRecord();};$('recordStudent').onchange=loadExistingRecord;$('saveRecord').onclick=saveRecord;
  $('reportScope').onchange=function(){report();if(window.MathAnalyzeExtensions?.refresh)window.MathAnalyzeExtensions.refresh();};$('exportReport').onclick=exportReport;
  $('importPack').onclick=function(){$('importInput').click();};$('importInput').onchange=async function(){var file=this.files[0];if(!file)return;$('importPack').disabled=true;try{await importZip(file);}catch(e){notify('題庫匯入失敗：'+e.message,true);$('importProgress').textContent=e.message;}finally{$('importPack').disabled=false;this.value='';}};
  $('addStudent').onclick=function(){addStudent(val('studentInput'));};$('studentInput').addEventListener('keydown',function(e){if(e.key==='Enter')addStudent(val('studentInput'));});
