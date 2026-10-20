@@ -186,7 +186,24 @@
    const dims=dimensions(all);
    const badRequired=required.find(id=>!dims[id]);if(badRequired)throw Error('指定最低題數中的題目 '+badRequired+' 缺少圖像尺寸，無法安全排版。');
    const clean=pool.filter(id=>!!dims[id]);
-   const result=Core.choose(required,clean,dims,o);
+   let result;
+   try{result=Core.choose(required,clean,dims,o);}
+   catch(error){
+    // If a first adaptive selection is too long for the page cap, try shorter
+    // intact questions from the same requested units before reporting conflict.
+    if(!required.length||!/最低題數無法/.test(String(error.message)))throw error;
+    const compact=[];
+    for(const code of o.topics){
+     const need=o.minimums[code]||0;
+     if(!need)continue;
+     const alternatives=clean.filter(id=>API.question(id)?.primary_topic_code===code)
+      .sort((a,b)=>(dims[a].height/dims[a].width)-(dims[b].height/dims[b].width));
+     if(alternatives.length<need)throw Error('單元 '+code+' 的完整候選題不足，無法滿足指定題數。');
+     compact.push(...alternatives.slice(0,need));
+    }
+    try{result=Core.choose(compact,clean,dims,o);}
+    catch(second){throw Error('已嘗試替換為同單元較短的完整題目，仍無法在指定頁數內容納必要題數。請增加頁數或減少指定題數。');}
+   }
    message('已成功排入 '+result.ids.length+' 題、'+result.layout.pageCount+' 頁（含答案），正在逐張驗證並生成PDF……');
    const pdf=await buildPdf(o,result.layout,result.ids);
    download(pdf,'PhysicsAnalyze_'+o.trainingDate+'_固定'+o.maxPages+'頁_'+result.ids.length+'題.pdf');
