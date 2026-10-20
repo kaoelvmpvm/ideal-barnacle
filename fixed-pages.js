@@ -65,13 +65,34 @@
    scope:mode==='individual'?student:'class',quotaMode};
  }
  async function pause(){return new Promise(resolve=>setTimeout(resolve,0));}
- function dimensions(ids){
-  const sizes={};
+ async function dimensions(ids){
+  const sizes={},pending=[];
   for(const id of ids){
    const q=API.question(id);
    if(!q)continue;
-   const width=Number(q.image_width),height=Number(q.image_height);
-   if(width>0&&height>0)sizes[id]={width,height};
+   const w=Number(q.image_width),h=Number(q.image_height);
+   if(w>0&&h>0)sizes[id]={width:w,height:h};
+   else pending.push(id);
+  }
+  // Older teacher packages may lack image dimensions in catalog.json.
+  // Read the original WebP dimensions in memory; never estimate an unknown geometry.
+  for(let i=0;i<pending.length;i++){
+   const id=pending[i],blob=await API.imageBlob(id);
+   if(!blob)continue;
+   let w=0,h=0;
+   if(typeof createImageBitmap==='function'){
+    const im=await createImageBitmap(blob);w=im.width;h=im.height;im.close();
+   }else{
+    const result=await new Promise((resolve,reject)=>{
+     const im=new Image(),url=URL.createObjectURL(blob);
+     im.onload=()=>{const dims={w:im.naturalWidth,h:im.naturalHeight};URL.revokeObjectURL(url);resolve(dims);};
+     im.onerror=()=>{URL.revokeObjectURL(url);reject(Error('無法讀取題圖 '+id));};
+     im.src=url;
+    });
+    w=result.w;h=result.h;
+   }
+   if(w>0&&h>0)sizes[id]={width:w,height:h};
+   if((i+1)%12===0){message('正在測量題圖尺寸 '+(i+1)+'／'+pending.length+'……');await pause();}
   }
   return sizes;
  }
@@ -183,7 +204,7 @@
    message('正在依各單元最低題數與歷次失分紀錄選題……');
    await pause();
    const {required,pool,available}=candidates(o),all=[...new Set([...required,...pool])];
-   const dims=dimensions(all);
+   const dims=await dimensions(all);
    const badRequired=required.find(id=>!dims[id]);if(badRequired)throw Error('指定最低題數中的題目 '+badRequired+' 缺少圖像尺寸，無法安全排版。');
    const clean=pool.filter(id=>!!dims[id]);
    let result;
