@@ -13,8 +13,9 @@
   const box=$('fixedTopics');if(!box)return;
   const current=new Map(Array.from(box.querySelectorAll('[data-fixed-topic]')).map(el=>[el.value,el.checked]));
   const minima=new Map(Array.from(box.querySelectorAll('[data-fixed-min]')).map(el=>[el.dataset.fixedMin,el.value]));
+  const exact=$('fixedQuotaMode')?.value==='exact';
   box.innerHTML=API.snapshot().topics.map(([code,name,unit])=>
-   '<div class="fixed-topic-row"><label><input type="checkbox" data-fixed-topic value="'+escape(code)+'" '+(current.has(code)?current.get(code)?'checked':'':'checked')+'> '+escape(unit)+' '+escape(name)+'</label><label class="fixed-min-label">至少 <input class="control" type="number" min="0" max="45" step="1" value="'+escape(minima.get(code)??0)+'" data-fixed-min="'+escape(code)+'" aria-label="'+escape(unit)+'最低題數"> 題</label></div>'
+   '<div class="fixed-topic-row"><label><input type="checkbox" data-fixed-topic value="'+escape(code)+'" '+(current.has(code)?current.get(code)?'checked':'':'checked')+'> '+escape(unit)+' '+escape(name)+'</label><label class="fixed-min-label"><span class="fixed-quota-word">'+(exact?'恰好':'至少')+'</span> <input class="control" type="number" min="0" max="45" step="1" value="'+escape(minima.get(code)??0)+'" data-fixed-min="'+escape(code)+'" aria-label="'+escape(unit)+'最低題數"> 題</label></div>'
   ).join('');
  }
  function fillStudents(){
@@ -31,10 +32,11 @@
  }
  function read(){
   if(!API.snapshot().ready)throw Error('請先在「設定與備份」匯入508題的理化題圖包。');
-  const maxPages=Number($('fixedPageLimit').value),maxQuestions=Number($('fixedQuestionCount').value);
-  const minQuestions=Number($('fixedMinTotal').value),minutes=Number($('fixedMinutes').value);
+  const maxPages=Number($('fixedPageLimit').value),minutes=Number($('fixedMinutes').value);
+  let maxQuestions=Number($('fixedQuestionCount').value),minQuestions=Number($('fixedMinTotal').value);
+  const quotaMode=$('fixedQuotaMode').value;
   const answerMode=$('fixedAnswerMode').value,mode=$('fixedMode').value,student=$('fixedStudent').value;
-  const trainingDate=$('fixedDate').value,topics=selected();
+  const trainingDate=$('fixedDate').value;let topics=selected();
   const title=$('fixedTitle').value.trim()||trainingDate+' 理化固定頁數練習卷';
   checkDate(trainingDate);
   if(!Number.isInteger(maxPages)||maxPages<1||maxPages>10)throw Error('頁數上限為1～10頁。');
@@ -51,9 +53,16 @@
    if(topics.includes(code))minimums[code]=x;
   }
   const requiredTotal=Object.values(minimums).reduce((a,b)=>a+b,0);
-  if(requiredTotal>maxQuestions)throw Error('各單元最低題數合計 '+requiredTotal+' 題，超過期望題數 '+maxQuestions+' 題。');
+  if(quotaMode==='exact'){
+   if(requiredTotal<1)throw Error('精確配題需要至少填寫一個單元的題數。');
+   if(requiredTotal>45)throw Error('精確配題最多45題。');
+   topics=topics.filter(code=>minimums[code]>0);
+   maxQuestions=requiredTotal;minQuestions=requiredTotal;
+  }else if(requiredTotal>maxQuestions){
+   throw Error('各單元最低題數合計 '+requiredTotal+' 題，超過期望題數 '+maxQuestions+' 題。');
+  }
   return {maxPages,maxQuestions,minQuestions,answerMode,minutes,mode,student,trainingDate,title,topics,minimums,
-   scope:mode==='individual'?student:'class'};
+   scope:mode==='individual'?student:'class',quotaMode};
  }
  async function pause(){return new Promise(resolve=>setTimeout(resolve,0));}
  function dimensions(ids){
@@ -217,6 +226,11 @@
     if(!event.target.checked)input.value=0;
    }
   });
+  $('fixedQuotaMode').onchange=()=>{
+   const exact=$('fixedQuotaMode').value==='exact';
+   $('fixedQuestionCount').disabled=exact;$('fixedMinTotal').disabled=exact;
+   document.querySelectorAll('.fixed-quota-word').forEach(el=>el.textContent=exact?'恰好':'至少');
+  };
   $('fixedCreate').onclick=generate;
   message('設定頁數、題數與單元；系統會保留完整題圖，最後一頁包含答案。');
  }
