@@ -23,3 +23,5 @@ jobs:
           node --check fixed-pages.js
       - name: Verify strict A4 and answer placement
         run: node tests/fixed-pages.test.cjs
+      - name: Verify individual paper student auto-select
+        run: node tests/record-student.test.cjs
