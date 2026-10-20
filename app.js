@@ -100,6 +100,7 @@ function selectQuestions(count,topicCodes,scope,trainingDate){
  });
 }
 function selectionSummary(p){
+ if(p?.fixedPages)return '限定 '+p.fixedPages.maxPages+' 頁（含答案）｜實際 '+p.fixedPages.pageCount+' 頁｜'+p.questionIds.length+' 題｜依自適應候選與原始圖像高度排版';
  var r=p?.selectionReport;
  if(!r)return '舊版考卷（未保存選題說明）';
  return '新增原題 '+r.previouslyUnseen+' 題｜補弱類別 '+r.intentCounts.repair+' 題｜探索 '+r.intentCounts.explore+' 題｜維持 '+r.intentCounts.review+' 題｜近期重複 '+r.recentRepeatCount+' 題'+(r.weakTopics?.length?'｜曾失分類別：'+r.weakTopics.map(topicName).join('、'):'｜尚無已登記失分考點')+(r.relaxedProtection?'（因候選題不足已放寬重複限制）':'');
@@ -122,7 +123,7 @@ function paperList(){
 }
 async function renderPreview(){
  var token=++previewToken,p=paperOf(selectedPaperId);
- $('printPaper').disabled=!p||state.packVersion!==ASSET_VERSION;$('downloadAnswers').disabled=!p;
+ $('printPaper').disabled=!p||state.packVersion!==ASSET_VERSION;$('downloadAnswers').disabled=!p;if(p)$('printPaper').textContent=p.fixedPages?'下載固定頁數PDF（含答案）':'列印考卷／另存PDF';
  if(!p){$('paperPreview').innerHTML=empty('尚未選擇考卷','出卷後會顯示題圖。');$('paperSelectedLabel').textContent='尚未選擇考卷';return;}if(state.packVersion!==ASSET_VERSION){$('paperPreview').innerHTML=empty('請重新匯入 v1 題圖包','理化版 切圖可能裁掉根式或分數上緣；匯入新版前暫停顯示與列印。');$('paperSelectedLabel').textContent=p.title;return;}
  $('paperSelectedLabel').textContent=p.title+'｜'+(p.trainingDate||String(p.date||'').slice(0,10))+'｜'+p.questionIds.length+'題｜'+p.minutes+'分鐘';if($('selectionExplanation')){$('selectionExplanation').className='notice'+(p.selectionReport?.relaxedProtection?' warn':'');$('selectionExplanation').textContent=selectionSummary(p)+'。補弱依八大教師分類，不代表已辨識相同理化概念的變化題。';}
  $('paperPreview').innerHTML='<p class="hint">正在載入來源題圖……</p>';
@@ -137,7 +138,8 @@ function csvDownload(name,rows){var csv='\ufeff'+rows.map(function(r){return r.m
 function download(name,mime,content){var url=URL.createObjectURL(new Blob([content],{type:mime})),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},500);}
 function answersCsv(){var p=paperOf(selectedPaperId);if(!p)return;csvDownload('答案_'+p.title+'.csv',[['新題號','題庫編號','考點','標準答案（來源未全面獨立驗算）']].concat(p.questionIds.map(function(id,i){return [i+1,id,qname(byId[id]),byId[id].answer_as_provided];})));}
 async function printCurrent(){
- var p=paperOf(selectedPaperId);if(!p)return;if(state.packVersion!==ASSET_VERSION){notify('舊版或不相容的題包無法使用；請先匯入v1題圖包。',true);return;}
+ var p=paperOf(selectedPaperId);if(!p)return;
+ if(p.fixedPages){if(!window.PhysicsFixedPages)return notify('固定頁數PDF模組未載入，請重新整理。',true);return window.PhysicsFixedPages.downloadExisting(p);}if(state.packVersion!==ASSET_VERSION){notify('舊版或不相容的題包無法使用；請先匯入v1題圖包。',true);return;}
  var cards=[];for(var i=0;i<p.questionIds.length;i++){var id=p.questionIds[i],u=await cardUrl(id);if(!u){notify('缺少原題圖：'+id+'，請重新匯入題包。',true);return;}cards.push('<div class="print-q"><div class="num">第 '+(i+1)+' 題</div><img src="'+u+'" alt="第'+(i+1)+'題"></div>');}
  $('print-root').innerHTML='<div class="print-hdr"><h2>'+safe(p.title)+'</h2><p>座號：＿＿＿＿　姓名：＿＿＿＿　　訓練日期：'+safe(p.trainingDate||String(p.date||'').slice(0,10))+'　　測驗時間：'+p.minutes+' 分鐘　　共 '+p.questionIds.length+' 題</p></div>'+cards.join('')+'<div class="answerpage"><h2>教師用答案卷（來源答案，請覆核）</h2><p>'+safe(p.title)+'</p><div class="answergrid">'+p.questionIds.map(function(id,i){return '<div>'+(i+1)+'. '+safe(byId[id].answer_as_provided)+'</div>';}).join('')+'</div></div>';
  var imgs=Array.from($('print-root').querySelectorAll('img'));
@@ -212,7 +214,7 @@ function settings(){
  $('packStatus').className='notice '+(state.packVersion===ASSET_VERSION&&len?'success':'warn');
  $('packStatus').textContent=len&&state.packVersion===ASSET_VERSION?'已載入新版 v1 共 '+len+' 題（保留PDF原圖；按教師九類分類）。題圖與紀錄均在此瀏覽器。':'尚未匯入新版 v1 題圖包，舊版題圖已停用。請下載 v1 ZIP 並重新匯入，原有測驗和學生紀錄會保留。';
 }
-function refreshAll(){refreshStudents();refreshTopics();refreshDashboard();refreshBank();paperList();refreshRecordHistory();report();settings();renderPreview();loadExistingRecord();if(window.MathAnalyzeExtensions?.refresh)window.MathAnalyzeExtensions.refresh();}
+function refreshAll(){refreshStudents();refreshTopics();refreshDashboard();refreshBank();paperList();refreshRecordHistory();report();settings();renderPreview();loadExistingRecord();if(window.MathAnalyzeExtensions?.refresh)window.MathAnalyzeExtensions.refresh();if(window.PhysicsFixedPages?.refresh)window.PhysicsFixedPages.refresh();}
 function switchTab(name){
  document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('active',x.id===name);});
  document.querySelectorAll('.nav-btn').forEach(function(x){x.classList.toggle('active',x.dataset.target===name);});
@@ -275,6 +277,21 @@ window.MathAnalyzeExtensionAPI={
  question:function(id){return byId[id]||null;},
  imageBlob:blobFor,
  createBatch:createStudentBatch,
+ planQuestions:selectQuestions,
+ usableQuestionCount:function(codes){var allow=new Set(codes);return catalog?catalog.questions.filter(function(q){return allow.has(q.primary_topic_code)&&active(q);}).length:0;},
+ storeFixedPaper:function(data){
+  if(!catalog||state.packVersion!==ASSET_VERSION)throw Error('請先匯入題圖包。');
+  var ids=data.questionIds||[],meta=data.fixedPages||{},layout=meta.layout;
+  if(!ids.length||new Set(ids).size!==ids.length||ids.some(function(id){return !active(byId[id]);}))throw Error('試卷題目有重複或停用題，不可儲存。');
+  if(!validTrainingDate(data.trainingDate))throw Error('訓練日期無效。');
+  if(data.mode==='individual'&&!state.students.includes(data.student))throw Error('學生代號不存在。');
+  if(!layout||layout.pageCount!==meta.pageCount||layout.pageCount>meta.maxPages||layout.questions.join('|')!==ids.join('|')||!layout.pages.at(-1)?.answer)
+   throw Error('固定頁數版面驗證失敗，不予儲存。');
+  var p={id:uid(),title:String(data.title||'理化固定頁數試卷').slice(0,90),date:new Date().toISOString(),
+    trainingDate:data.trainingDate,minutes:data.minutes,mode:data.mode,student:data.student,
+    questionIds:ids.slice(),fixedPages:meta};
+  state.papers.push(p);selectedPaperId=p.id;save();refreshAll();return p;
+ },
  toast:notify,
  openTab:switchTab
 };
