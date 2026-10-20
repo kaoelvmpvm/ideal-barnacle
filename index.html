@@ -30,8 +30,9 @@
 <p class="hint" style="margin-top:13px">範例：頁數 2、期望 15 題，答案獨立最後一頁；系統最多使用 1 頁出題、1 頁答案。若無法容納 15 題，會自動降低實際題數；填寫「至少需要幾題」可避免過度縮減。</p>
 </div>
 <div class="card">
-<h3 class="section-title">2. 指定單元與最低題數</h3>
-<p class="hint">勾選要抽題的單元。各單元「至少幾題」預設 0，表示讓系統自動依弱點與守備範圍分配；若指定最低題數，必須全部排入才會建立試卷。</p>
+<h3 class="section-title">2. 指定單元與題數</h3>
+<div class="field" style="margin-bottom:12px"><label for="fixedQuotaMode">各單元題數要求</label><select id="fixedQuotaMode"><option value="minimum" selected>最低題數（其他題數讓系統自動分配）</option><option value="exact">精確題數（各單元只能出指定的題數）</option></select></div>
+<p class="hint">選擇「最低題數」時，填 0 代表自由分配。選擇「精確題數」時，填 0 代表該單元不出題，總題數以各單元填寫數字合計為準。若裝不進限定頁數則不出卷。</p>
 <div class="fixed-topic-list" id="fixedTopics"></div>
 <div class="notice warn" style="margin-top:17px">不裁切題幹、圖表及選項；若頁數不足、最低題數無法排入，系統會停止並提示調整條件。答案僅沿用來源題庫標記，正式測驗前請教師抽查。</div>
 </div></div>
