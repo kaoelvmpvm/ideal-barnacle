@@ -40,7 +40,7 @@ for(const mode of ['separate','inline']){
 assert.throws(()=>core.layout(['p-001','p-001'],sizes,opt(3,'inline')),/重複題號/);n++;
 assert.throws(()=>core.layout(['nonexistent'],sizes,opt(2,'inline')),/圖像尺寸/);n++;
 const large={a:{width:900,height:1200},b:{width:900,height:1300}};
-assert.throws(()=>core.choose(['a','b'],[],large,opt(2,'separate',2,2)),/最低單元題數無法/);n++;
+assert.throws(()=>core.choose(['a','b'],[],large,opt(2,'separate',2,2)),/最低題數無法/);n++;
 const quota=core.choose(ids.slice(0,3),ids.slice(3),sizes,opt(2,'separate',3,3));
 assert.equal(quota.ids.length,3);inspect(quota,2);n++;
 assert.throws(()=>core.choose([],ids.slice(0,10),sizes,opt(2,'separate',15,15)),/低於你要求/);n++;
