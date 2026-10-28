@@ -57,4 +57,14 @@ for(const count of [1,5,10,15,25,45]){
 }
 // Previously generated worksheets still use their original maximum-page behavior.
 assert.equal(core.layout([ids[0]],sizes,opt(2,'inline')).pageCount,1);n++;
+const oldSizes={a:{width:171,height:100},b:{width:171,height:140},c:{width:171,height:20}};
+const oldLayout=core.layout(['a','b','c'],oldSizes,{maxPages:2,answerMode:'inline',exactPages:true,preserveOrder:true});
+assert.equal(oldLayout.pageCount,2);
+assert.deepEqual(oldLayout.questions,['a','b','c']);
+assert.deepEqual(oldLayout.pages[0].questions.map(q=>q.id),['a']);
+assert.deepEqual(oldLayout.pages[1].questions.map(q=>q.id),['b','c']);
+assert(oldLayout.pages[1].answer,'legacy page-two answers must remain present');n++;
+const tooLong={a:{width:171,height:205},b:{width:171,height:205}};
+assert.equal(core.layout(['a','b'],tooLong,{maxPages:2,answerMode:'inline',exactPages:true,preserveOrder:true}),null);
+n++;
 console.log('Fixed-page tests passed:',n,'cases');
