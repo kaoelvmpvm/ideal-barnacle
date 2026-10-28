@@ -31,7 +31,7 @@
   }));
   const items=ids.map(id=>dimensions(sizes,id));
   // First-fit decreasing reorders complete questions; it never crops, splits, or scales a question.
-  items.sort((a,b)=>b.height-a.height||ids.indexOf(a.id)-ids.indexOf(b.id));
+  if(!options.preserveOrder)items.sort((a,b)=>b.height-a.height||ids.indexOf(a.id)-ids.indexOf(b.id));
   for(const item of items){
    if(item.height>PAGE.bottom-PAGE.top-PAGE.gap)return null;
    let bin=bins.find(b=>b.y+item.height+PAGE.gap<=b.maxY+0.000001);
@@ -55,7 +55,7 @@
   const mode=options.answerMode||'separate';
   if(mode!=='separate'&&mode!=='inline')throw Error('答案排版方式無效。');
   if(mode==='separate'&&maxPages<2)throw Error('答案獨立一頁時，頁數上限至少須為2頁。');
-  const setting={answerMode:mode};
+  const setting={answerMode:mode,preserveOrder:options.preserveOrder===true};
   for(let pages=options.exactPages===true?maxPages:1;pages<=maxPages;pages++){
    const result=tryPack(ids,sizes,setting,pages);
    if(result)return result;
