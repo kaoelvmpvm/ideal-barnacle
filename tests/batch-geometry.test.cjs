@@ -135,7 +135,7 @@ async function verify(){
  // Browser fallback without createImageBitmap must also keep exact pixels.
  let revoked=0,created=0;
  class HTMLImage{
-  constructor(){this.naturalWidth=900;this.naturalHeight=420;}
+  constructor(){this.naturalWidth=900;this.naturalHeight=420;this.width=900;this.height=420;}
   set src(value){if(this.onload)this.onload();}
  }
  const fallback=new Function('API','createImageBitmap','document','URL','Image','Blob',
