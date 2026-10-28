@@ -224,7 +224,7 @@
      compact.push(...alternatives.slice(0,need));
     }
     try{result=Core.choose(compact,clean,dims,o);}
-    catch(second){throw Error('已嘗試替換為同單元較短的完整題目，仍無法在指定頁數內容納必要題數。請增加頁數或減少指定題數。');}
+    catch(second){throw Error('已嘗試替換為同單元較短的完整題目，仍無法在固定兩頁內容納必要題數。請減少指定題數或調整單元範圍。');}
    }
    if(result.layout.pageCount!==FIXED_PAGE_COUNT||result.layout.answerMode!==FIXED_ANSWER_MODE||!result.layout.pages[1]?.answer)throw Error('固定兩頁省紙版驗證失敗。');
     message('已排入 '+result.ids.length+' 題，固定兩頁（答案在第二頁底端），正在生成 PDF……');
@@ -232,7 +232,7 @@
    download(pdf,'PhysicsAnalyze_'+o.trainingDate+'_固定'+o.maxPages+'頁_'+result.ids.length+'題.pdf');
    API.storeFixedPaper({title:o.title,trainingDate:o.trainingDate,minutes:o.minutes,mode:o.mode,student:o.student,
     questionIds:result.ids,fixedPages:{maxPages:o.maxPages,exactPages:true,answerMode:o.answerMode,pageCount:result.layout.pageCount,layout:result.layout}});
-   message('完成：'+result.ids.length+' 題、實際 '+result.layout.pageCount+'／上限 '+o.maxPages+' 頁（答案已包含）。'+
+   message('完成：'+result.ids.length+' 題，固定兩頁（答案在第二頁底端）。'+
     (result.ids.length<o.maxQuestions?'因版面限制，未達期望 '+o.maxQuestions+' 題；較長的題圖已自動略過。':'已達期望題數。')+
     ' 已儲存試卷，可至「智能出卷」重印，或於「錯題登記」使用。');
    API.toast('已下載固定頁數PDF：'+result.layout.pageCount+'頁／'+result.ids.length+'題。');
