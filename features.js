@@ -35,7 +35,9 @@ function renderBatches(){
   let dt=papers[0]?.date||'';
   const counts=papers.map(p=>p.questionIds.length),lowest=Math.min(...counts),highest=Math.max(...counts);
   const countLabel=lowest===highest?lowest+'題／人':lowest+'～'+highest+'題／人';
-  return '<div class="batch-history-item"><span><strong>'+esc(papers[0].title.replace(/｜[^｜]+$/,''))+'</strong><small>'+esc(papers[0].trainingDate||dt.slice(0,10))+' · '+papers.length+' 位 · '+countLabel+' · 2頁／人（含答案）</small></span><span class="actions"><button class="btn" data-bulk-redownload="'+esc(id)+'">下載合併PDF</button><button class="btn" data-bulk-answers="'+esc(id)+'">答案CSV</button></span></div>';
+  const allNew=papers.every(p=>p.fixedPages?.pageCount===2&&p.fixedPages?.answerMode==='inline');
+  const pagesLabel=allNew?'2頁／人（含答案）':'舊版試卷（重印需符合雙頁限制）';
+  return '<div class="batch-history-item"><span><strong>'+esc(papers[0].title.replace(/｜[^｜]+$/,''))+'</strong><small>'+esc(papers[0].trainingDate||dt.slice(0,10))+' · '+papers.length+' 位 · '+countLabel+' · '+pagesLabel+'</small></span><span class="actions"><button class="btn" data-bulk-redownload="'+esc(id)+'">下載合併PDF</button><button class="btn" data-bulk-answers="'+esc(id)+'">答案CSV</button></span></div>';
  }).join(''):'<p class="hint">尚無已建立的批次個別卷。按上方「批次產生並下載」即可開始。</p>';
 }
 function setBusy(on,message){
