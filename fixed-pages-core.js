@@ -32,9 +32,16 @@
   const items=ids.map(id=>dimensions(sizes,id));
   // First-fit decreasing reorders complete questions; it never crops, splits, or scales a question.
   if(!options.preserveOrder)items.sort((a,b)=>b.height-a.height||ids.indexOf(a.id)-ids.indexOf(b.id));
+  let currentBin=0;
   for(const item of items){
    if(item.height>PAGE.bottom-PAGE.top-PAGE.gap)return null;
-   let bin=bins.find(b=>b.y+item.height+PAGE.gap<=b.maxY+0.000001);
+   let bin;
+   if(options.preserveOrder){
+    while(currentBin<bins.length&&bins[currentBin].y+item.height+PAGE.gap>bins[currentBin].maxY+0.000001)currentBin++;
+    bin=bins[currentBin];
+   }else{
+    bin=bins.find(b=>b.y+item.height+PAGE.gap<=b.maxY+0.000001);
+   }
    if(!bin)return null;
    bin.items.push({id:item.id,y:bin.y,height:item.height,width:item.width});
    bin.y+=item.height+PAGE.gap;
