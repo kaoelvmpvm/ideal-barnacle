@@ -249,13 +249,13 @@ function storedLayoutIsSafe(layout,p,sizes,core){
  }
  return seen===p.questionIds.length;
 }
-async function layoutOf(p,sizeCache){
+async function layoutOf(p,sizeCache,renderedSizes){
  const core=window.PhysicsFixedCore;
  if(!core)throw Error('固定兩頁排版模組未載入。');
  // Always inspect the actual WebP dimensions. Old saved layouts may have
  // been calculated from inaccurate catalog metadata.
  const sizes={};
- for(const id of p.questionIds)sizes[id]=await getDimensions(id,sizeCache);
+ for(const id of p.questionIds)sizes[id]=renderedSizes?.[id]||await getDimensions(id,sizeCache);
  const stored=p.fixedPages?.layout;
  if(storedLayoutIsSafe(stored,p,sizes,core))return stored;
  // Reflow the FULL saved set without removing, reordering or renumbering.
@@ -277,7 +277,15 @@ async function combinedPdf(papers){
  imageCache=new Map();
  try{
   for(let k=0;k<papers.length;k++){
-   const p=papers[k],layout=await layoutOf(p,sizeCache);
+   const p=papers[k],renderedSizes={},assets=new Map();
+   // Validate actual encoded JPEG geometry before drawing any page for this student.
+   for(const id of p.questionIds){
+    const asset=await getJpeg(id);
+    if(!(asset.width>0&&asset.height>0))throw Error('學生 '+p.student+' 題目 '+id+' 的 PDF 圖像無有效尺寸。');
+    assets.set(id,asset);
+    renderedSizes[id]={width:asset.width,height:asset.height};
+   }
+   const layout=await layoutOf(p,sizeCache,renderedSizes);
    if(layout.pageCount!==BATCH_PAGES||layout.pages.length!==BATCH_PAGES||
       layout.answerMode!=='inline'||!layout.pages[1].answer||
       layout.questions.join('|')!==p.questionIds.join('|'))
@@ -288,10 +296,11 @@ async function combinedPdf(papers){
     const sheet=layout.pages[page];
     pdf.addImage(headerPng(p,page===1),'PNG',14,12,182,26);
     for(const item of sheet.questions){
-     const asset=await getJpeg(item.id);
+     const asset=assets.get(item.id);
+     if(!asset)throw Error('題目 '+item.id+' 的 JPEG 預先驗證資料遺失。');
      const h=core.PAGE.imageWidth*asset.height/asset.width;
-     if(!Number.isFinite(h)||Math.abs(h-item.height)>1)
-      throw Error('學生 '+p.student+' 的題目 '+item.id+' 圖片尺寸變動，停止輸出以防超頁。');
+     if(!Number.isFinite(h)||Math.abs(h-item.height)>0.05)
+      throw Error('學生 '+p.student+' 的題目 '+item.id+' 排版仍有尺寸差異（預計 '+item.height.toFixed(2)+'，實際 '+h.toFixed(2)+' mm）。已安全中止；請重新產生該份試卷。');
      if(item.y+item.height>core.PAGE.bottom+0.01)throw Error('題目 '+item.id+' 超過列印安全範圍。');
      pdf.setFont('helvetica','normal');pdf.setFontSize(11);pdf.setTextColor(35,48,67);
      pdf.text(String(item.number)+'.',14,item.y+6);
@@ -305,6 +314,8 @@ async function combinedPdf(papers){
     }
    }
    setBusy(true,'正在合併 '+(k+1)+'／'+papers.length+' 位，已加入 '+total+' 題……');
+   // Release JPEG data URLs after each student's two pages to bound memory usage.
+   assets.clear();imageCache.clear();
    if(k%2===1)await new Promise(resolve=>setTimeout(resolve,0));
   }
   if(pdf.internal.getNumberOfPages()!==papers.length*BATCH_PAGES)
