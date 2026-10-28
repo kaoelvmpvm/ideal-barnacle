@@ -6,7 +6,8 @@
  const $=id=>document.getElementById(id);
  const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const nowDate=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);};
- let busy=false;
+ const FIXED_PAGE_COUNT=2, FIXED_ANSWER_MODE='inline';
+  let busy=false;
  function message(s,bad){const box=$('fixedStatus');if(!box)return;box.className='notice'+(bad?' warn':'');box.textContent=s;box.setAttribute('role','status');}
  function selected(){return Array.from(document.querySelectorAll('[data-fixed-topic]:checked')).map(el=>el.value);}
  function fillTopics(){
@@ -32,15 +33,15 @@
  }
  function read(){
   if(!API.snapshot().ready)throw Error('請先在「設定與備份」匯入508題的理化題圖包。');
-  const maxPages=Number($('fixedPageLimit').value),minutes=Number($('fixedMinutes').value);
+  const maxPages=FIXED_PAGE_COUNT,minutes=Number($('fixedMinutes').value);
   let maxQuestions=Number($('fixedQuestionCount').value),minQuestions=Number($('fixedMinTotal').value);
   const quotaMode=$('fixedQuotaMode').value;
-  const answerMode=$('fixedAnswerMode').value,mode=$('fixedMode').value,student=$('fixedStudent').value;
+  const answerMode=FIXED_ANSWER_MODE,mode=$('fixedMode').value,student=$('fixedStudent').value;
   const trainingDate=$('fixedDate').value;let topics=selected();
   const title=$('fixedTitle').value.trim()||trainingDate+' 理化固定頁數練習卷';
   checkDate(trainingDate);
-  if(!Number.isInteger(maxPages)||maxPages<1||maxPages>10)throw Error('頁數上限為1～10頁。');
-  if(answerMode==='separate'&&maxPages<2)throw Error('答案獨立最後一頁時，至少須設定2頁。');
+  
+  
   if(!Number.isInteger(maxQuestions)||maxQuestions<1||maxQuestions>45)throw Error('期望題數為1～45題。');
   if(!Number.isInteger(minQuestions)||minQuestions<0||minQuestions>maxQuestions)throw Error('至少題數應為0～期望題數。');
   if(!topics.length)throw Error('請至少勾選一個單元。');
@@ -61,7 +62,7 @@
   }else if(requiredTotal>maxQuestions){
    throw Error('各單元最低題數合計 '+requiredTotal+' 題，超過期望題數 '+maxQuestions+' 題。');
   }
-  return {maxPages,maxQuestions,minQuestions,answerMode,minutes,mode,student,trainingDate,title,topics,minimums,
+  return {maxPages,exactPages:true,maxQuestions,minQuestions,answerMode,minutes,mode,student,trainingDate,title,topics,minimums,
    scope:mode==='individual'?student:'class',quotaMode};
  }
  async function pause(){return new Promise(resolve=>setTimeout(resolve,0));}
@@ -167,7 +168,7 @@
  }
  async function buildPdf(o,layout,ids){
   const PDF=window.jspdf?.jsPDF;if(!PDF)throw Error('PDF 模組尚未載入，請檢查網路後重新整理。');
-  if(layout.pageCount>o.maxPages)throw Error('排版超過指定頁數，已中止輸出。');
+  if(layout.pageCount>o.maxPages||(o.exactPages&&layout.pageCount!==FIXED_PAGE_COUNT))throw Error('排版必須為固定兩頁，已中止輸出。');
   if(layout.questions.join('|')!==ids.join('|'))throw Error('題目排列與版面資訊不一致，請重新產生。');
   if(layout.pages.length!==layout.pageCount||!layout.pages.at(-1).answer)throw Error('答案頁排版資料不完整。');
   const pdf=new PDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
@@ -189,7 +190,7 @@
    if(p.answer)pdf.addImage(answerImage(ids,p.answer.height,o.answerMode==='separate'),'PNG',12,p.answer.y,186,p.answer.height);
    if(pageIdx%2===1){message('正在產生PDF：'+(pageIdx+1)+'／'+layout.pageCount+'頁……');await pause();}
   }
-  if(pdf.internal.getNumberOfPages()!==layout.pageCount||pdf.internal.getNumberOfPages()>o.maxPages)
+  if(pdf.internal.getNumberOfPages()!==layout.pageCount||pdf.internal.getNumberOfPages()>o.maxPages||(o.exactPages&&pdf.internal.getNumberOfPages()!==FIXED_PAGE_COUNT))
    throw Error('實際PDF頁數與限制不一致，已中止下載。');
   return pdf.output('blob');
  }
@@ -225,11 +226,12 @@
     try{result=Core.choose(compact,clean,dims,o);}
     catch(second){throw Error('已嘗試替換為同單元較短的完整題目，仍無法在指定頁數內容納必要題數。請增加頁數或減少指定題數。');}
    }
-   message('已成功排入 '+result.ids.length+' 題、'+result.layout.pageCount+' 頁（含答案），正在逐張驗證並生成PDF……');
+   if(result.layout.pageCount!==FIXED_PAGE_COUNT||result.layout.answerMode!==FIXED_ANSWER_MODE||!result.layout.pages[1]?.answer)throw Error('固定兩頁省紙版驗證失敗。');
+    message('已排入 '+result.ids.length+' 題，固定兩頁（答案在第二頁底端），正在生成 PDF……');
    const pdf=await buildPdf(o,result.layout,result.ids);
    download(pdf,'PhysicsAnalyze_'+o.trainingDate+'_固定'+o.maxPages+'頁_'+result.ids.length+'題.pdf');
    API.storeFixedPaper({title:o.title,trainingDate:o.trainingDate,minutes:o.minutes,mode:o.mode,student:o.student,
-    questionIds:result.ids,fixedPages:{maxPages:o.maxPages,answerMode:o.answerMode,pageCount:result.layout.pageCount,layout:result.layout}});
+    questionIds:result.ids,fixedPages:{maxPages:o.maxPages,exactPages:true,answerMode:o.answerMode,pageCount:result.layout.pageCount,layout:result.layout}});
    message('完成：'+result.ids.length+' 題、實際 '+result.layout.pageCount+'／上限 '+o.maxPages+' 頁（答案已包含）。'+
     (result.ids.length<o.maxQuestions?'因版面限制，未達期望 '+o.maxQuestions+' 題；較長的題圖已自動略過。':'已達期望題數。')+
     ' 已儲存試卷，可至「智能出卷」重印，或於「錯題登記」使用。');
@@ -270,7 +272,7 @@
    document.querySelectorAll('.fixed-quota-word').forEach(el=>el.textContent=exact?'恰好':'至少');
   };
   $('fixedCreate').onclick=generate;
-  message('設定頁數、題數與單元；系統會保留完整題圖，最後一頁包含答案。');
+  message('試卷一律輸出 A4 兩頁；答案固定於第二頁底端（省紙模式）。');
  }
  window.PhysicsFixedPages={refresh,downloadExisting,core:Core};
  init();
