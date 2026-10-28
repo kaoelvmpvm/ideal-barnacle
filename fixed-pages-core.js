@@ -70,7 +70,7 @@
   if(must.length!==required.length)throw Error('最低單元題目重複，無法排版。');
   if(must.length>wanted)throw Error('各單元最低題數總和超過期望題數。');
   if(must.length&&!layout(must,sizes,options))
-   throw Error('指定的各單元最低題數無法在頁數上限內完整排入（含答案）。請增加頁數或降低最低題數。');
+   throw Error('指定的各單元最低題數無法在目前頁數內完整排入（含答案）。請降低最低題數或調整配題單元。');
   let checked=0,skipped=0;
   for(const id of candidates){
    if(chosen.length>=wanted)break;
@@ -80,7 +80,7 @@
    else skipped++;
   }
   if(!chosen.length)throw Error('選定範圍內沒有任何題目能在指定頁數內完整排入。');
-  if(chosen.length<least)throw Error('實際僅能排入 '+chosen.length+' 題，低於你要求的至少 '+least+' 題。請提高頁數上限或降低題數。');
+  if(chosen.length<least)throw Error('實際僅能排入 '+chosen.length+' 題，低於你要求的至少 '+least+' 題。請降低最低題數或調整單元範圍。');
   const result=layout(chosen,sizes,options);
   if(!result)throw Error('無法產生符合頁數的版面，請調整設定。');
   return {ids:result.questions,layout:result,skipped,checked,requested:wanted,reached:result.questions.length===wanted};
