@@ -105,7 +105,7 @@ function clearPreparedPdf(){
   link.textContent='點此下載合併 PDF（若未自動下載）';
   // Asynchronous image processing may lose browser user activation for automatic downloads.
   // Retain a visible link so the teacher can download with an explicit click.
-  link.click();
+  try{link.click();}catch(error){/* Manual link remains available for user activation. */}
   return {bytes:blob.size,pages:pdf.internal.getNumberOfPages()};
  }
  async function combinedPdf(papers){
@@ -174,7 +174,7 @@ async function mergeExisting(){
  if(!confirm('這些學生最新試卷的訓練日期、題數或考試時間不完全相同，仍要合併嗎？'))return;
  }
  setBusy(true,'正在合併 '+latest.length+' 份既有個別卷……');
- try{await combinedPdf(latest);}catch(err){toast('合併失敗：'+err.message,true);}finally{setBusy(false,'');}
+ try{await combinedPdf(latest);}catch(err){toast('合併失敗：'+err.message,true);setBusy(true,'合併失敗：'+err.message);}finally{setBusy(false,$('bulkProgress')?.textContent||'');}
 }
 
 function studentData(student){
@@ -236,7 +236,7 @@ async function openWrong(id){
 }
 function refresh(){renderStudents();renderBatches();individualReport();}
 function init(){
-  window.addEventListener('pagehide',()=>{if(preparedPdfUrl)URL.revokeObjectURL(preparedPdfUrl);});
+  window.addEventListener('pagehide',clearPreparedPdf);
  $('bulkSelectAll').onclick=()=>{selectedIds=new Set(snapshot().students);renderStudents();};
  $('bulkSelectNone').onclick=()=>{selectedIds.clear();initialized=true;renderStudents();};
  $('bulkStudentList').addEventListener('change',e=>{const id=e.target.dataset.bulkStudent;if(!id)return;if(e.target.checked)selectedIds.add(id);else selectedIds.delete(id);initialized=true;renderStudents();});
@@ -248,7 +248,7 @@ function init(){
   const papers=snapshot().papers.filter(p=>p.batchId===id).sort((a,b)=>a.student.localeCompare(b.student,'zh-Hant'));
   if(ans){batchAnswers(papers);return;}if(generating)return;
   setBusy(true,'正在合併既有批次 '+papers.length+' 份試卷……');
-  try{await combinedPdf(papers);}catch(err){toast('下載失敗：'+err.message,true);}finally{setBusy(false,'');}
+  try{await combinedPdf(papers);}catch(err){toast('下載失敗：'+err.message,true);setBusy(true,'下載失敗：'+err.message);}finally{setBusy(false,$('bulkProgress')?.textContent||'');}
  });
  $('studentWrongDetail').addEventListener('click',e=>{const btn=e.target.closest('[data-show-wrong]');if(btn)openWrong(btn.dataset.showWrong);});
  $('wrongDialogClose').onclick=()=>$('wrongDialog').close?.();
