@@ -67,22 +67,16 @@
  }
  async function pause(){return new Promise(resolve=>setTimeout(resolve,0));}
  async function dimensions(ids){
-  const sizes={},pending=[];
-  for(const id of ids){
-   const q=API.question(id);
-   if(!q)continue;
-   const w=Number(q.image_width),h=Number(q.image_height);
-   if(w>0&&h>0)sizes[id]={width:w,height:h};
-   else pending.push(id);
-  }
-  // Older teacher packages may lack image dimensions in catalog.json.
-  // Read the original WebP dimensions in memory; never estimate an unknown geometry.
-  for(let i=0;i<pending.length;i++){
-   const id=pending[i],blob=await API.imageBlob(id);
+  // Catalog image dimensions can be stale; always inspect each original WebP.
+  // Keep the source aspect ratio because toJpeg() verifies the same ratio.
+  const sizes={};
+  for(let i=0;i<ids.length;i++){
+   const id=ids[i],blob=await API.imageBlob(id);
    if(!blob)continue;
    let w=0,h=0;
    if(typeof createImageBitmap==='function'){
-    const im=await createImageBitmap(blob);w=im.width;h=im.height;im.close();
+    const bitmap=await createImageBitmap(blob);
+    try{w=bitmap.width;h=bitmap.height;}finally{bitmap.close();}
    }else{
     const result=await new Promise((resolve,reject)=>{
      const im=new Image(),url=URL.createObjectURL(blob);
@@ -93,7 +87,7 @@
     w=result.w;h=result.h;
    }
    if(w>0&&h>0)sizes[id]={width:w,height:h};
-   if((i+1)%12===0){message('正在測量題圖尺寸 '+(i+1)+'／'+pending.length+'……');await pause();}
+   if((i+1)%12===0){message('正在測量實際題圖尺寸 '+(i+1)+'／'+ids.length+'……');await pause();}
   }
   return sizes;
  }
@@ -244,15 +238,28 @@
   if(!API.snapshot().ready)throw Error('請重新匯入理化題庫 ZIP，才能重印試卷。');
   if(!p||!p.fixedPages)throw Error('不是固定頁數考卷。');
   const fixed=p.fixedPages,layout=fixed.layout;
-  if(!layout||!Array.isArray(layout.pages)||layout.questions.join('|')!==p.questionIds.join('|'))
+  if(!layout||!Array.isArray(layout.pages)||!Array.isArray(layout.questions)||layout.questions.join('|')!==p.questionIds.join('|'))
    throw Error('此卷的原始固定版面資料遺失，為避免版面改變，請重新配題。');
   const o={title:p.title,trainingDate:p.trainingDate||String(p.date||'').slice(0,10),
-   minutes:p.minutes,maxPages:fixed.maxPages,answerMode:fixed.answerMode};
+   minutes:p.minutes,maxPages:fixed.maxPages,answerMode:fixed.answerMode,exactPages:fixed.exactPages===true};
   busy=true;
   try{
-   const blob=await buildPdf(o,layout,p.questionIds);
+   const sizes=await dimensions(p.questionIds);
+   const hasMismatch=layout.pages.some(page=>page.questions.some(item=>{
+    const size=sizes[item.id];
+    return !size||Math.abs(Core.PAGE.imageWidth*size.height/size.width-item.height)>0.05;
+   }));
+   let outputLayout=layout;
+   if(hasMismatch){
+    outputLayout=Core.layout(p.questionIds,sizes,{
+     maxPages:o.maxPages,answerMode:o.answerMode,exactPages:o.exactPages,preserveOrder:true
+    });
+    if(!outputLayout||outputLayout.questions.join('|')!==p.questionIds.join('|'))
+     throw Error('此卷的舊版尺寸資料不正確，依實際題圖已無法完整排入原本頁數。原紀錄未修改，請重新產生新卷。');
+   }
+   const blob=await buildPdf(o,outputLayout,p.questionIds);
    download(blob,'PhysicsAnalyze_'+o.trainingDate+'_重印固定'+o.maxPages+'頁.pdf');
-   API.toast('已重印原版固定頁數考卷。');
+   API.toast(hasMismatch?'已依真實題圖尺寸重新排版並下載，題號與題數未變。':'已重印原版固定頁數考卷。');
   }catch(err){API.toast('重印失敗：'+err.message,true);}
   finally{busy=false;}
  }
