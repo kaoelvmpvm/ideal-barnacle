@@ -79,20 +79,59 @@ function headerPng(p,continued){
  ctx.strokeStyle='#92a5b8';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(22,165);ctx.lineTo(1470,165);ctx.stroke();
  return c.toDataURL('image/png');
 }
+function imagePixelSize(width,height){
+ // Shared by selection and rendering: identical resizing and pixel rounding.
+ if(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)
+  throw Error('題圖無有效的寬高，請重新匯入題庫 ZIP。');
+ const scale=Math.min(1,1600/width);
+ return {width:Math.max(1,Math.round(width*scale)),
+   height:Math.max(1,Math.round(height*scale))};
+}
+async function decodeImage(blob){
+ if(typeof createImageBitmap==='function')return await createImageBitmap(blob);
+ // Fallback for browsers without createImageBitmap.
+ const url=URL.createObjectURL(blob);
+ try{
+  return await new Promise((resolve,reject)=>{
+   const img=new Image();
+   img.onload=()=>resolve(img);
+   img.onerror=()=>reject(Error('無法解碼題圖，請重新匯入題庫 ZIP。'));
+   img.src=url;
+  });
+ }finally{URL.revokeObjectURL(url);}
+}
+function decodedImageSize(source){
+ return imagePixelSize(Number(source.naturalWidth||source.width),Number(source.naturalHeight||source.height));
+}
 async function asJpeg(blob){
- const bitmap=await createImageBitmap(blob);
- const canvas=document.createElement('canvas');let width=bitmap.width;
- const factor=Math.min(1,1600/width);
- canvas.width=Math.max(1,Math.round(width*factor));canvas.height=Math.max(1,Math.round(bitmap.height*factor));
- const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);
- const data=canvas.toDataURL('image/jpeg',0.91);
- bitmap.close();canvas.width=1;canvas.height=1;
- return {data:data,width:Math.round(width*factor),height:Math.round(bitmap.height*factor)};
+ const source=await decodeImage(blob);
+ let canvas;
+ try{
+  // Capture BOTH dimensions while source is alive. ImageBitmap.close() may
+  // detach the image and zero its width/height, even before this function returns.
+  const size=decodedImageSize(source);
+  canvas=document.createElement('canvas');
+  canvas.width=size.width;canvas.height=size.height;
+  const ctx=canvas.getContext('2d');
+  if(!ctx)throw Error('瀏覽器無法建立 JPEG 題圖。');
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,size.width,size.height);
+  ctx.drawImage(source,0,0,size.width,size.height);
+  const data=canvas.toDataURL('image/jpeg',0.91);
+  if(typeof data!=='string'||!data.startsWith('data:image/jpeg'))
+   throw Error('題圖 JPEG 轉換失敗。');
+  return {data,width:size.width,height:size.height};
+ }finally{
+  if(source.close)source.close();
+  if(canvas){canvas.width=1;canvas.height=1;}
+ }
 }
 async function getJpeg(id){
  if(imageCache.has(id))return imageCache.get(id);
  const b=await API.imageBlob(id);if(!b)throw Error('題目 '+id+' 圖片不存在，請先重新匯入 v1 題圖包。');
- const result=await asJpeg(b);imageCache.set(id,result);return result;
+ const result=await asJpeg(b);
+ if(!(result.width>0&&result.height>0))throw Error('題目 '+id+' JPEG 尺寸不正確。');
+ imageCache.set(id,result);
+ return result;
 }
 function clearPreparedPdf(){
   const link=$('bulkPdfReady');
@@ -122,16 +161,10 @@ async function getDimensions(id,cache){
  if(cache.has(id))return cache.get(id);
  const blob=await API.imageBlob(id);
  if(!blob)throw Error('題目 '+id+' 的原始題圖不存在，請重新匯入題庫 ZIP。');
- if(typeof createImageBitmap!=='function')throw Error('此瀏覽器不支援題圖尺寸解碼，請使用最新版 Edge 或 Chrome。');
- const bitmap=await createImageBitmap(blob);
- let width,height;
- try{
-  const scale=Math.min(1,1600/bitmap.width);
-  width=Math.max(1,Math.round(bitmap.width*scale));
-  height=Math.max(1,Math.round(bitmap.height*scale));
- }finally{bitmap.close();}
- if(!(width>0&&height>0))throw Error('題目 '+id+' 的實際圖片尺寸無效。');
- const size={width,height};
+ const source=await decodeImage(blob);
+ let size;
+ try{size=decodedImageSize(source);}
+ finally{if(source.close)source.close();}
  cache.set(id,size);
  return size;
 }
