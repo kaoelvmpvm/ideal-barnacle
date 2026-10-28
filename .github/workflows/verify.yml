@@ -25,3 +25,7 @@ jobs:
         run: node tests/fixed-pages.test.cjs
       - name: Verify individual paper student auto-select
         run: node tests/record-student.test.cjs
+      - name: Verify batch image decoding and PDF pagination
+        run: node tests/batch-geometry.test.cjs
+      - name: Verify single-paper image decoding and geometry
+        run: node tests/image-conversion.test.cjs
