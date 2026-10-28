@@ -56,7 +56,7 @@
   if(mode!=='separate'&&mode!=='inline')throw Error('答案排版方式無效。');
   if(mode==='separate'&&maxPages<2)throw Error('答案獨立一頁時，頁數上限至少須為2頁。');
   const setting={answerMode:mode};
-  for(let pages=1;pages<=maxPages;pages++){
+  for(let pages=options.exactPages===true?maxPages:1;pages<=maxPages;pages++){
    const result=tryPack(ids,sizes,setting,pages);
    if(result)return result;
   }
