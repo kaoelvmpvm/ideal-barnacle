@@ -132,6 +132,21 @@ async function verify(){
  assert.equal(core.layout(['x','y','z'],tooLarge,{
   maxPages:2,exactPages:true,answerMode:'inline',preserveOrder:true
  }),null);
+ // Browser fallback without createImageBitmap must also keep exact pixels.
+ let revoked=0,created=0;
+ class HTMLImage{
+  constructor(){this.naturalWidth=900;this.naturalHeight=420;}
+  set src(value){if(this.onload)this.onload();}
+ }
+ const fallback=new Function('API','createImageBitmap','document','URL','Image','Blob',
+  'let imageCache=new Map();\n'+converter+'\nreturn {getJpeg,getDimensions:undefined};')(
+  {imageBlob:async()=>({id:'fallback'})},undefined,document,
+  {createObjectURL:()=>{created++;return 'blob:fallback';},revokeObjectURL:()=>{revoked++;}},
+  HTMLImage,Object
+ );
+ const fallbackJpeg=await fallback.getJpeg('fallback');
+ assert.deepEqual([fallbackJpeg.width,fallbackJpeg.height],[900,420]);
+ assert.equal(created,1);assert.equal(revoked,1);
  assert.equal(closes,decodes,'Every decoded bitmap must be closed');
  console.log('Batch geometry tests passed: 3 students, 6 PDF pages, P31-024 and P31-017, downsizing, stale-layout recovery, bitmap lifecycle');
 }
