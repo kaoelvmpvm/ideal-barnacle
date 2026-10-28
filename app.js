@@ -264,17 +264,28 @@ function createStudentBatch(request){
  if(!Number.isInteger(count)||count<4||count>45||!Number.isFinite(minutes)||minutes<=0)throw Error('請檢查題數與測驗時間。');
  if(!topics.length)throw Error('請至少選擇一項考點。');
  if(!validTrainingDate(trainingDate))throw Error('請選擇有效的訓練日期。');
+ // Persist only fully verified two-sheet individual papers. Never save a
+ // larger question set and then silently omit questions from the exported PDF.
+ var plans=request.plans,core=window.PhysicsFixedCore;
+ if(!core||!Array.isArray(plans)||plans.length!==students.length)throw Error('批次個別卷必須先完成每人兩頁省紙排版，才可儲存。');
  var batchId='batch-'+uid(),batch=[],signatures=new Set(),prefix=String(request.title||'').trim()||(trainingDate+' 理化個別卷');
- students.forEach(function(student){
-   var plan=null,qs=null,signature='';
-   for(var retry=0;retry<8;retry++){
-    plan=selectQuestions(count,topics,student,trainingDate);qs=plan.ids;
-    signature=qs.slice().sort().join('|');
-    if(!signatures.has(signature))break;
-   }
-   if(signatures.has(signature))throw Error('目前可用題庫無法替所有學生產生互不相同的試卷，請增加考點或減少題數。');
+ students.forEach(function(student,index){
+   var plan=plans[index],qs=plan&&plan.questionIds,layout=plan&&plan.layout;
+   if(!plan||plan.student!==student||!Array.isArray(qs)||!qs.length||qs.length>count||new Set(qs).size!==qs.length)
+    throw Error('學生 '+student+' 的配題數量或題號不正確，已取消整批儲存。');
+   if(qs.some(function(id){return !active(byId[id])||topics.indexOf(byId[id].primary_topic_code)<0;}))
+    throw Error('學生 '+student+' 的試卷含停用或範圍外題目，已取消整批儲存。');
+   if(!layout||layout.pageCount!==2||layout.answerMode!=='inline'||!Array.isArray(layout.pages)||layout.pages.length!==2||
+      layout.pages[0].answer||!layout.pages[1].answer||!Array.isArray(layout.questions)||layout.questions.join('|')!==qs.join('|')||
+      layout.pages.flatMap(function(p){return p.questions.map(function(q){return q.id;});}).join('|')!==qs.join('|')||
+      layout.pages[1].answer.y+layout.pages[1].answer.height>core.PAGE.bottom+0.01)
+    throw Error('學生 '+student+' 無法完成兩頁省紙版面檢核，已取消整批儲存。');
+   var signature=qs.slice().sort().join('|');
+   if(signatures.has(signature))throw Error('學生 '+student+' 的題目與同批另一份完全相同，請擴大考點或減少題數後重試。');
    signatures.add(signature);
-   batch.push({id:uid(),batchId:batchId,title:prefix+'｜'+student,student:student,mode:'individual',minutes:minutes,trainingDate:trainingDate,questionIds:qs,selectionReport:plan.report,date:new Date().toISOString()});
+   batch.push({id:uid(),batchId:batchId,title:prefix+'｜'+student,student:student,mode:'individual',
+     minutes:minutes,trainingDate:trainingDate,questionIds:qs.slice(),date:new Date().toISOString(),
+     fixedPages:{maxPages:2,pageCount:2,answerMode:'inline',exactPages:true,layout:layout}});
  });
  state.papers.push.apply(state.papers,batch);
  selectedPaperId=batch[0].id;
