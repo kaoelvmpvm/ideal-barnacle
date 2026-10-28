@@ -44,4 +44,17 @@ assert.throws(()=>core.choose(['a','b'],[],large,opt(2,'separate',2,2)),/最低�
 const quota=core.choose(ids.slice(0,3),ids.slice(3),sizes,opt(2,'separate',3,3));
 assert.equal(quota.ids.length,3);inspect(quota,2);n++;
 assert.throws(()=>core.choose([],ids.slice(0,10),sizes,opt(2,'separate',15,15)),/低於你要求/);n++;
+// New worksheet mode must always use exactly two A4 pages with answers below page-two questions.
+for(const count of [1,5,10,15,25,45]){
+ const exact={...opt(2,'inline',count),exactPages:true};
+ const result=core.choose([],ids,sizes,exact);
+ inspect(result,2);
+ assert.equal(result.layout.pageCount,2);
+ assert.equal(result.layout.answerMode,'inline');
+ assert.equal(result.layout.pages[0].answer,null);
+ assert(result.layout.pages[1].answer);
+ n++;
+}
+// Previously generated worksheets still use their original maximum-page behavior.
+assert.equal(core.layout([ids[0]],sizes,opt(2,'inline')).pageCount,1);n++;
 console.log('Fixed-page tests passed:',n,'cases');
