@@ -108,42 +108,139 @@ function clearPreparedPdf(){
   try{link.click();}catch(error){/* Manual link remains available for user activation. */}
   return {bytes:blob.size,pages:pdf.internal.getNumberOfPages()};
  }
- async function combinedPdf(papers){
- clearPreparedPdf();
-  if(!papers.length)throw Error('未選擇任何個別卷。');
- if(!snapshot().ready)throw Error('請先匯入 v1 題圖包，才能合併下載。');
- const JSPDF=window.jspdf?.jsPDF;if(!JSPDF)throw Error('PDF 組件未載入，請檢查網路連線並重新整理。');
- const pdf=new JSPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
- const W=210,H=297,margin=14,imageX=28,imageW=169,top=44,bottom=278;
- let total=0,started=false;
- imageCache=new Map();
- try {
- for(let k=0;k<papers.length;k++){
-   const p=papers[k];
-   if(started)pdf.addPage();
-   started=true;
-   let y=top,part=1;
-   const drawHead=()=>{pdf.addImage(headerPng(p,part>1),'PNG',margin,12,182,26);y=44;};
-   drawHead();
-   for(let i=0;i<p.questionIds.length;i++){
-    const id=p.questionIds[i],asset=await getJpeg(id);
-    if(!asset.width||!asset.height)throw Error('圖片 '+id+' 尺寸異常');
-    let h=asset.height/asset.width*imageW;
-    if(h>bottom-top-10)h=bottom-top-10;
-    if(y+h+9>bottom){pdf.addPage();part++;drawHead();}
-    pdf.setFont('helvetica','normal');pdf.setFontSize(10);pdf.setTextColor(35,48,67);
-    pdf.text(String(i+1)+'.',16,y+6);
-    pdf.addImage(asset.data,'JPEG',imageX,y,imageW,h,'q_'+id,'FAST');
-    y+=h+8;total++;
-    if(total%7===0){setBusy(true,'正在合併 '+(k+1)+'／'+papers.length+' 位，已加入 '+total+' 題……');await new Promise(r=>setTimeout(r,0));}
-   }
+ 
+const BATCH_PAGES=2;
+const INLINE_OPTIONS={maxPages:BATCH_PAGES,exactPages:true,answerMode:'inline'};
+async function getDimensions(id,cache){
+ if(cache.has(id))return cache.get(id);
+ const q=API.question(id)||{};
+ let width=Number(q.image_width),height=Number(q.image_height);
+ if(!(width>0&&height>0)){
+  const asset=await getJpeg(id);
+  width=asset.width;height=asset.height;
  }
- const file='MathAnalyze_個別卷合併_'+papers.length+'人_'+new Date().toISOString().slice(0,10)+'.pdf';
- setBusy(true,'PDF 已排版完成，正在準備下載……');
- const summary=offerPdfDownload(pdf,file);
-  setBusy(true,'已建立 '+summary.pages+' 頁合併 PDF（'+(summary.bytes/1024/1024).toFixed(1)+' MB）。若沒有自動下載，請按「點此下載合併 PDF」。');
- toast('合併PDF已建立：'+papers.length+'位學生、'+total+'題。如未自動下載，請按下載連結。');
- } finally {imageCache.clear();}
+ if(!(width>0&&height>0))throw Error('題目 '+id+' 的圖片尺寸異常。');
+ const size={width,height};cache.set(id,size);return size;
+}
+async function prepareBatchPlans(students,maxQuestions,trainingDate,topics){
+ const core=window.PhysicsFixedCore;
+ if(!core)throw Error('兩頁排版模組未載入，請重新整理。');
+ const overall=API.usableQuestionCount(topics);
+ if(overall<4)throw Error('所選單元可用題數少於4題，無法批次產生個別卷。');
+ const limits=topics.map(code=>({code,count:API.usableQuestionCount([code])})).filter(x=>x.count);
+ const sizeCache=new Map(),signatures=new Set(),plans=[];
+ for(let i=0;i<students.length;i++){
+  const student=students[i];
+  let result=null,signature='';
+  for(let attempt=0;attempt<8;attempt++){
+   const poolCount=Math.min(overall,Math.max(30,maxQuestions*3),45);
+   const main=API.planQuestions(poolCount,topics,student,trainingDate).ids;
+   const pool=[...main];
+   for(const item of limits){
+    const extra=API.planQuestions(Math.min(item.count,8),[item.code],student,trainingDate).ids;
+    pool.push(...extra);
+   }
+   const candidates=[...new Set(pool)],sizes={},valid=[];
+   for(const id of candidates){
+    try{sizes[id]=await getDimensions(id,sizeCache);valid.push(id);}
+    catch(error){/* An unreadable candidate is never selected or stored. */}
+   }
+   if(!valid.length)throw Error('學生 '+student+' 所選考點沒有可以完整排版的題圖。');
+   result=core.choose([],valid,sizes,{...INLINE_OPTIONS,maxQuestions,minQuestions:1});
+   if(result.layout.pageCount!==2||result.layout.answerMode!=='inline')throw Error('學生 '+student+' 無法符合固定兩頁規格。');
+   signature=result.ids.slice().sort().join('|');
+   if(!signatures.has(signature))break;
+  }
+  if(signatures.has(signature))throw Error('學生 '+student+' 與同批其他學生的完整題目重複；請增加單元範圍或降低預設題數後重試。');
+  signatures.add(signature);
+  plans.push({student,questionIds:result.ids,layout:result.layout});
+  setBusy(true,'正在排版學生 '+(i+1)+'／'+students.length+'（'+student+'）：'+result.ids.length+'題／固定2頁……');
+  if(i%2===1)await new Promise(resolve=>setTimeout(resolve,0));
+ }
+ return plans;
+}
+function answerPng(p,answerHeight){
+ const width=1600,ratio=width/186,c=document.createElement('canvas');
+ c.width=width;c.height=Math.round(answerHeight*ratio);
+ const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+ ctx.strokeStyle='#aabbd0';ctx.lineWidth=3;ctx.strokeRect(2,2,c.width-4,c.height-4);
+ ctx.fillStyle='#16334f';ctx.font='bold 38px "Microsoft JhengHei","Noto Sans TC",sans-serif';
+ ctx.fillText('教師用答案（依原題庫標記，請覆核）',23,66);
+ ctx.font='23px "Microsoft JhengHei","Noto Sans TC",sans-serif';
+ ctx.fillText('提醒：本頁含答案，請勿直接發給學生。',23,102);
+ const step=9*ratio,colWidth=width/6;
+ for(let i=0;i<p.questionIds.length;i++){
+  const q=API.question(p.questionIds[i])||{},value=String(q.answer_as_provided||'?').toUpperCase();
+  ctx.fillStyle='#263c53';ctx.font='bold 37px Arial,"Microsoft JhengHei",sans-serif';
+  ctx.fillText((i+1)+'. '+value,20+(i%6)*colWidth,133+Math.floor(i/6)*step,colWidth-25);
+ }
+ const png=c.toDataURL('image/png');c.width=c.height=1;return png;
+}
+async function layoutOf(p,sizeCache){
+ const core=window.PhysicsFixedCore;
+ if(!core)throw Error('固定兩頁排版模組未載入。');
+ const stored=p.fixedPages?.layout;
+ if(p.fixedPages?.pageCount===2&&p.fixedPages?.answerMode==='inline'&&stored?.pageCount===2&&
+    stored.pages?.length===2&&stored.pages[1]?.answer&&stored.questions?.join('|')===p.questionIds.join('|'))return stored;
+ // Legacy papers retain their recorded question order; do not silently drop or reorder them.
+ const sizes={};
+ for(const id of p.questionIds)sizes[id]=await getDimensions(id,sizeCache);
+ const layout=core.layout(p.questionIds,sizes,{...INLINE_OPTIONS,preserveOrder:true});
+ if(!layout||layout.questions.join('|')!==p.questionIds.join('|'))
+  throw Error('既有試卷「'+p.title+'」的完整題目無法排入兩頁（含答案），紀錄未變更；請重新產生新的雙頁個別卷。');
+ return layout;
+}
+async function combinedPdf(papers){
+ clearPreparedPdf();
+ if(!papers.length)throw Error('未選擇任何個別卷。');
+ if(!snapshot().ready)throw Error('請先匯入 v1 題圖包，才能合併下載。');
+ const JSPDF=window.jspdf?.jsPDF;
+ if(!JSPDF)throw Error('PDF 組件未載入，請檢查網路連線並重新整理。');
+ const pdf=new JSPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
+ const core=window.PhysicsFixedCore;
+ if(!core)throw Error('兩頁排版模組未載入，請重新整理。');
+ const sizeCache=new Map();let total=0,started=false;
+ imageCache=new Map();
+ try{
+  for(let k=0;k<papers.length;k++){
+   const p=papers[k],layout=await layoutOf(p,sizeCache);
+   if(layout.pageCount!==BATCH_PAGES||layout.pages.length!==BATCH_PAGES||
+      layout.answerMode!=='inline'||!layout.pages[1].answer||
+      layout.questions.join('|')!==p.questionIds.join('|'))
+    throw Error('學生 '+p.student+' 的雙頁試卷結構不正確，停止合併。');
+   for(let page=0;page<BATCH_PAGES;page++){
+    if(started)pdf.addPage();
+    started=true;
+    const sheet=layout.pages[page];
+    pdf.addImage(headerPng(p,page===1),'PNG',14,12,182,26);
+    for(const item of sheet.questions){
+     const asset=await getJpeg(item.id);
+     const h=core.PAGE.imageWidth*asset.height/asset.width;
+     if(!Number.isFinite(h)||Math.abs(h-item.height)>1)
+      throw Error('學生 '+p.student+' 的題目 '+item.id+' 圖片尺寸變動，停止輸出以防超頁。');
+     if(item.y+item.height>core.PAGE.bottom+0.01)throw Error('題目 '+item.id+' 超過列印安全範圍。');
+     pdf.setFont('helvetica','normal');pdf.setFontSize(11);pdf.setTextColor(35,48,67);
+     pdf.text(String(item.number)+'.',14,item.y+6);
+     pdf.addImage(asset.data,'JPEG',core.PAGE.imageX,item.y,core.PAGE.imageWidth,item.height,'q_'+item.id,'FAST');
+     total++;
+    }
+    if(sheet.answer){
+     if(page!==1||sheet.answer.y+sheet.answer.height>core.PAGE.bottom+0.01)
+      throw Error('學生 '+p.student+' 的答案區塊超出第二頁。');
+     pdf.addImage(answerPng(p,sheet.answer.height),'PNG',12,sheet.answer.y,186,sheet.answer.height);
+    }
+   }
+   setBusy(true,'正在合併 '+(k+1)+'／'+papers.length+' 位，已加入 '+total+' 題……');
+   if(k%2===1)await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  if(pdf.internal.getNumberOfPages()!==papers.length*BATCH_PAGES)
+   throw Error('合併頁數不正確，應為每位學生恰好2頁。');
+  const file='PhysicsAnalyze_個別卷合併_固定雙頁_'+papers.length+'人_'+new Date().toISOString().slice(0,10)+'.pdf';
+  setBusy(true,'雙頁PDF已排版完成，正在準備下載……');
+  const summary=offerPdfDownload(pdf,file);
+  setBusy(true,'已建立 '+summary.pages+' 頁合併 PDF（'+(summary.bytes/1024/1024).toFixed(1)+' MB，每人2頁含答案）。如未自動下載，請點擊下載連結。');
+  toast('合併 PDF 已建立：'+papers.length+'位學生，每人2頁含答案，共'+total+'題。');
+ }finally{imageCache.clear();}
 }
 async function runBatch(){
  if(generating)return;
