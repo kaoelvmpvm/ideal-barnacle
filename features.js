@@ -116,15 +116,24 @@ function clearPreparedPdf(){
 const BATCH_PAGES=2;
 const INLINE_OPTIONS={maxPages:BATCH_PAGES,exactPages:true,answerMode:'inline'};
 async function getDimensions(id,cache){
+ // The catalog's image_width/image_height can differ from the actual WebP.
+ // Measure the decoded source, then apply exactly the same JPEG downscaling
+ // and integer rounding as asJpeg(), so pagination matches PDF rendering.
  if(cache.has(id))return cache.get(id);
- const q=API.question(id)||{};
- let width=Number(q.image_width),height=Number(q.image_height);
- if(!(width>0&&height>0)){
-  const asset=await getJpeg(id);
-  width=asset.width;height=asset.height;
- }
- if(!(width>0&&height>0))throw Error('題目 '+id+' 的圖片尺寸異常。');
- const size={width,height};cache.set(id,size);return size;
+ const blob=await API.imageBlob(id);
+ if(!blob)throw Error('題目 '+id+' 的原始題圖不存在，請重新匯入題庫 ZIP。');
+ if(typeof createImageBitmap!=='function')throw Error('此瀏覽器不支援題圖尺寸解碼，請使用最新版 Edge 或 Chrome。');
+ const bitmap=await createImageBitmap(blob);
+ let width,height;
+ try{
+  const scale=Math.min(1,1600/bitmap.width);
+  width=Math.max(1,Math.round(bitmap.width*scale));
+  height=Math.max(1,Math.round(bitmap.height*scale));
+ }finally{bitmap.close();}
+ if(!(width>0&&height>0))throw Error('題目 '+id+' 的實際圖片尺寸無效。');
+ const size={width,height};
+ cache.set(id,size);
+ return size;
 }
 async function prepareBatchPlans(students,maxQuestions,trainingDate,topics){
  const core=window.PhysicsFixedCore;
@@ -180,18 +189,46 @@ function answerPng(p,answerHeight){
  }
  const png=c.toDataURL('image/png');c.width=c.height=1;return png;
 }
+function storedLayoutIsSafe(layout,p,sizes,core){
+ if(!layout||layout.pageCount!==BATCH_PAGES||layout.answerMode!=='inline'||
+    !Array.isArray(layout.pages)||layout.pages.length!==BATCH_PAGES||
+    layout.pages[0].answer||!layout.pages[1].answer||
+    !Array.isArray(layout.questions)||layout.questions.join('|')!==p.questionIds.join('|'))return false;
+ const answer=layout.pages[1].answer;
+ if(Math.abs(answer.height-core.answerHeight(p.questionIds.length))>0.01||
+    answer.y+answer.height>core.PAGE.bottom+0.01)return false;
+ let seen=0;
+ for(let page=0;page<BATCH_PAGES;page++){
+  const sheet=layout.pages[page],maxY=page===1?answer.y-8:core.PAGE.bottom;
+  if(!Array.isArray(sheet.questions))return false;
+  let lower=core.PAGE.top;
+  for(const item of sheet.questions){
+   const size=sizes[item.id];
+   if(!size||item.id!==p.questionIds[seen]||item.number!==seen+1||
+      !Number.isFinite(item.y)||!Number.isFinite(item.height))return false;
+   const actual=core.PAGE.imageWidth*size.height/size.width;
+   // Exact decoded-image dimensions are used at PDF output, not catalog metadata.
+   if(Math.abs(actual-item.height)>0.05||
+      item.y<lower-0.01||item.y+actual>maxY+0.01)return false;
+   lower=item.y+actual+core.PAGE.gap;
+   seen++;
+  }
+ }
+ return seen===p.questionIds.length;
+}
 async function layoutOf(p,sizeCache){
  const core=window.PhysicsFixedCore;
  if(!core)throw Error('固定兩頁排版模組未載入。');
- const stored=p.fixedPages?.layout;
- if(p.fixedPages?.pageCount===2&&p.fixedPages?.answerMode==='inline'&&stored?.pageCount===2&&
-    stored.pages?.length===2&&stored.pages[1]?.answer&&stored.questions?.join('|')===p.questionIds.join('|'))return stored;
- // Legacy papers retain their recorded question order; do not silently drop or reorder them.
+ // Always inspect the actual WebP dimensions. Old saved layouts may have
+ // been calculated from inaccurate catalog metadata.
  const sizes={};
  for(const id of p.questionIds)sizes[id]=await getDimensions(id,sizeCache);
+ const stored=p.fixedPages?.layout;
+ if(storedLayoutIsSafe(stored,p,sizes,core))return stored;
+ // Reflow the FULL saved set without removing, reordering or renumbering.
  const layout=core.layout(p.questionIds,sizes,{...INLINE_OPTIONS,preserveOrder:true});
  if(!layout||layout.questions.join('|')!==p.questionIds.join('|'))
-  throw Error('既有試卷「'+p.title+'」的完整題目無法排入兩頁（含答案），紀錄未變更；請重新產生新的雙頁個別卷。');
+  throw Error('既有試卷「'+p.title+'」依實際題圖尺寸無法完整排入2頁。原題目與紀錄已保留；請重新「批次產生並合併下載 PDF」以自動調整題數。');
  return layout;
 }
 async function combinedPdf(papers){
