@@ -33,7 +33,9 @@ function renderBatches(){
  const groups=batchGroups();
  box.innerHTML=groups.length?groups.slice(0,10).map(([id,papers])=>{
   let dt=papers[0]?.date||'';
-  return '<div class="batch-history-item"><span><strong>'+esc(papers[0].title.replace(/｜[^｜]+$/,''))+'</strong><small>'+esc(papers[0].trainingDate||dt.slice(0,10))+' · '+papers.length+' 位 · '+papers[0].questionIds.length+'題／人</small></span><span class="actions"><button class="btn" data-bulk-redownload="'+esc(id)+'">下載合併PDF</button><button class="btn" data-bulk-answers="'+esc(id)+'">答案CSV</button></span></div>';
+  const counts=papers.map(p=>p.questionIds.length),lowest=Math.min(...counts),highest=Math.max(...counts);
+  const countLabel=lowest===highest?lowest+'題／人':lowest+'～'+highest+'題／人';
+  return '<div class="batch-history-item"><span><strong>'+esc(papers[0].title.replace(/｜[^｜]+$/,''))+'</strong><small>'+esc(papers[0].trainingDate||dt.slice(0,10))+' · '+papers.length+' 位 · '+countLabel+' · 2頁／人（含答案）</small></span><span class="actions"><button class="btn" data-bulk-redownload="'+esc(id)+'">下載合併PDF</button><button class="btn" data-bulk-answers="'+esc(id)+'">答案CSV</button></span></div>';
  }).join(''):'<p class="hint">尚無已建立的批次個別卷。按上方「批次產生並下載」即可開始。</p>';
 }
 function setBusy(on,message){
@@ -253,7 +255,8 @@ async function runBatch(){
  if(ids.length*count>700&&!confirm('此次共 '+ids.length*count+' 題，合併 PDF 可能需要較長時間及記憶體。仍要繼續嗎？'))return;
  setBusy(true,'正在為 '+ids.length+' 位學生選題……');
  try{
-  const papers=API.createBatch({students:ids,count,minutes,trainingDate,topics,title:$('paperTitle').value});
+  const plans=await prepareBatchPlans(ids,count,trainingDate,topics);
+   const papers=API.createBatch({students:ids,count,minutes,trainingDate,topics,title:$('paperTitle').value,plans});
   renderBatches();
   await combinedPdf(papers);
  }catch(err){toast('批次處理未完成：'+err.message,true);setBusy(true,'操作遇到問題：'+err.message+'。如已產生試卷，可在下方「歷次批次」重新下載。');}
