@@ -7,6 +7,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const pad=n=>String(n).padStart(2,'0');
 const reasonNames={K:'知識不熟',P:'推理／方法錯',C:'已確認非知識性失誤',T:'時間不足',U:'未判定'};
 let generating=false, initialized=false, selectedIds=new Set(), imageCache=new Map(), detailList=[];
+ let preparedPdfUrl=null;
 function toast(message,err){API.toast(message,!!err);}
 function snapshot(){return API.snapshot();}
 function selectedTopics(){return Array.from(document.querySelectorAll('#paperTopics input:checked')).map(x=>x.value);}
@@ -89,8 +90,27 @@ async function getJpeg(id){
  const b=await API.imageBlob(id);if(!b)throw Error('題目 '+id+' 圖片不存在，請先重新匯入 v1 題圖包。');
  const result=await asJpeg(b);imageCache.set(id,result);return result;
 }
-async function combinedPdf(papers){
- if(!papers.length)throw Error('未選擇任何個別卷。');
+function clearPreparedPdf(){
+  const link=$('bulkPdfReady');
+  if(link){link.style.display='none';link.removeAttribute('href');link.removeAttribute('download');}
+  if(preparedPdfUrl){URL.revokeObjectURL(preparedPdfUrl);preparedPdfUrl=null;}
+ }
+ function offerPdfDownload(pdf,filename){
+  const blob=pdf.output('blob');
+  if(!(blob instanceof Blob)||blob.size<1000)throw Error('產生的 PDF 檔案異常，未提供下載。');
+  const link=$('bulkPdfReady');
+  if(!link)throw Error('找不到 PDF 下載連結，請重新整理網頁。');
+  preparedPdfUrl=URL.createObjectURL(blob);
+  link.href=preparedPdfUrl;link.download=filename;link.style.display='inline-flex';
+  link.textContent='點此下載合併 PDF（若未自動下載）';
+  // Asynchronous image processing may lose browser user activation for automatic downloads.
+  // Retain a visible link so the teacher can download with an explicit click.
+  link.click();
+  return {bytes:blob.size,pages:pdf.internal.getNumberOfPages()};
+ }
+ async function combinedPdf(papers){
+ clearPreparedPdf();
+  if(!papers.length)throw Error('未選擇任何個別卷。');
  if(!snapshot().ready)throw Error('請先匯入 v1 題圖包，才能合併下載。');
  const JSPDF=window.jspdf?.jsPDF;if(!JSPDF)throw Error('PDF 組件未載入，請檢查網路連線並重新整理。');
  const pdf=new JSPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
@@ -120,8 +140,9 @@ async function combinedPdf(papers){
  }
  const file='MathAnalyze_個別卷合併_'+papers.length+'人_'+new Date().toISOString().slice(0,10)+'.pdf';
  setBusy(true,'PDF 已排版完成，正在準備下載……');
- pdf.save(file);
- toast('已產生合併PDF：'+papers.length+'位學生、'+total+'題。');
+ const summary=offerPdfDownload(pdf,file);
+  setBusy(true,'已建立 '+summary.pages+' 頁合併 PDF（'+(summary.bytes/1024/1024).toFixed(1)+' MB）。若沒有自動下載，請按「點此下載合併 PDF」。');
+ toast('合併PDF已建立：'+papers.length+'位學生、'+total+'題。如未自動下載，請按下載連結。');
  } finally {imageCache.clear();}
 }
 async function runBatch(){
@@ -215,6 +236,7 @@ async function openWrong(id){
 }
 function refresh(){renderStudents();renderBatches();individualReport();}
 function init(){
+  window.addEventListener('pagehide',()=>{if(preparedPdfUrl)URL.revokeObjectURL(preparedPdfUrl);});
  $('bulkSelectAll').onclick=()=>{selectedIds=new Set(snapshot().students);renderStudents();};
  $('bulkSelectNone').onclick=()=>{selectedIds.clear();initialized=true;renderStudents();};
  $('bulkStudentList').addEventListener('change',e=>{const id=e.target.dataset.bulkStudent;if(!id)return;if(e.target.checked)selectedIds.add(id);else selectedIds.delete(id);initialized=true;renderStudents();});
