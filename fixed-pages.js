@@ -7,6 +7,13 @@
  const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const nowDate=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);};
  const FIXED_PAGE_COUNT=2, FIXED_ANSWER_MODE='inline';
+  function pdfImagePixels(width,height){
+   if(!(Number.isFinite(width)&&Number.isFinite(height)&&width>0&&height>0))
+    throw Error('題圖尺寸無效，請重新匯入題圖包。');
+   const scale=Math.min(1,1800/width);
+   return {width:Math.max(1,Math.round(width*scale)),
+    height:Math.max(1,Math.round(height*scale))};
+  }
   let busy=false;
  function message(s,bad){const box=$('fixedStatus');if(!box)return;box.className='notice'+(bad?' warn':'');box.textContent=s;box.setAttribute('role','status');}
  function selected(){return Array.from(document.querySelectorAll('[data-fixed-topic]:checked')).map(el=>el.value);}
@@ -86,7 +93,7 @@
     });
     w=result.w;h=result.h;
    }
-   if(w>0&&h>0)sizes[id]={width:w,height:h};
+   if(w>0&&h>0)sizes[id]=pdfImagePixels(w,h);
    if((i+1)%12===0){message('正在測量實際題圖尺寸 '+(i+1)+'／'+ids.length+'……');await pause();}
   }
   return sizes;
@@ -116,23 +123,25 @@
   return {required,pool:[...all],available:nAvailable};
  }
  async function toJpeg(blob){
-  let source;
-  if(typeof createImageBitmap==='function')source=await createImageBitmap(blob);
-  else source=await new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(blob);img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};img.onerror=()=>{URL.revokeObjectURL(url);reject(Error('題圖解碼失敗'));};img.src=url;});
-  const width=source.width,height=source.height;
-  const scale=Math.min(1,1800/width);
-  const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(width*scale));
-  canvas.height=Math.max(1,Math.round(height*scale));
-  const ctx=canvas.getContext('2d');
-  if(!ctx)throw Error('瀏覽器無法繪製題目圖片。');
-  ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(source,0,0,canvas.width,canvas.height);
-  const data=canvas.toDataURL('image/jpeg',0.94);
-  if(source.close)source.close();
-  canvas.width=1;canvas.height=1;
-  return {data,width,height};
- }
- function headerImage(o,page,total,count,isAnswer){
+   let source,canvas;
+   try{
+    if(typeof createImageBitmap==='function')source=await createImageBitmap(blob);
+    else source=await new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(blob);img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};img.onerror=()=>{URL.revokeObjectURL(url);reject(Error('題圖解碼失敗'));};img.src=url;});
+    const pixels=pdfImagePixels(Number(source.naturalWidth||source.width),Number(source.naturalHeight||source.height));
+    canvas=document.createElement('canvas');canvas.width=pixels.width;canvas.height=pixels.height;
+    const ctx=canvas.getContext('2d');
+    if(!ctx)throw Error('瀏覽器無法繪製題目圖片。');
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,pixels.width,pixels.height);
+    ctx.drawImage(source,0,0,pixels.width,pixels.height);
+    const data=canvas.toDataURL('image/jpeg',0.94);
+    if(typeof data!=='string'||!data.startsWith('data:image/jpeg'))throw Error('題圖 JPEG 轉換失敗。');
+    return {data,width:pixels.width,height:pixels.height};
+   }finally{
+    if(source?.close)source.close();
+    if(canvas){canvas.width=1;canvas.height=1;}
+   }
+  }
+  function headerImage(o,page,total,count,isAnswer){
   const c=document.createElement('canvas');c.width=1500;c.height=240;
   const ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
   ctx.fillStyle='#16334f';ctx.font='bold 47px "Microsoft JhengHei","Noto Sans TC",sans-serif';
